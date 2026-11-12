@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UDM (Universal Download Manager) - Modern Kinetic Emblem Foreground -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- LAYER 0: Volumetric Ambient Drop Shadow for Floating Elevation -->
+    <path
+        android:pathData="M31,34 C31,29.5 41,29.5 41,34 L41,63 C41,70 47,76 54,76 C61,76 67,70 67,63 L67,34 C67,29.5 77,29.5 77,34 L77,65 C77,77 67,86 54,86 C41,86 31,77 31,65 Z"
+        android:fillColor="#50000000" />
+    <path
+        android:pathData="M54,29 L50.5,29 L50.5,56 L43,59 L54,73 L65,59 L57.5,56 L57.5,29 Z"
+        android:fillColor="#45000000" />
+
+    <!-- LAYER 1: The Outer "U" Hull (The Universal Vessel) -->
+    <!-- Left Wing & Base Transition: Electric Violet to Vibrant Cyan -->
+    <path
+        android:pathData="M31,31 C31,27.5 41,27.5 41,31 L41,60 C41,67 47,73 54,73 C61,73 67,67 67,60 L67,31 C67,27.5 77,27.5 77,31 L77,62 C77,74 67,83 54,83 C41,83 31,74 31,62 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="31"
+                android:startY="28"
+                android:endX="77"
+                android:endY="83"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#A855F7" />
+                <item android:offset="0.3" android:color="#6366F1" />
+                <item android:offset="0.65" android:color="#00E5FF" />
+                <item android:offset="1.0" android:color="#00B4D8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Sleek Glassmorphic Edge Highlight on Outer Hull -->
+    <path
+        android:strokeWidth="1.2"
+        android:strokeColor="#50FFFFFF"
+        android:fillColor="#00000000"
+        android:pathData="M32,32 L32,62 C32,73.5 41.5,82 54,82 C66.5,82 76,73.5 76,62 L76,32" />
+
+    <!-- LAYER 2: Multi-Thread Satellite Speed Stream Pulses (8-Thread Chunk Engine) -->
+    <!-- Left Speed Pulse -->
+    <path
+        android:pathData="M44.5,32 L47,32 L47,44 C47,45.4 45.9,46.5 44.5,46.5 C43.1,46.5 42,45.4 42,44 L42,34.5 C42,33.1 43.1,32 44.5,32 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="44.5"
+                android:startY="32"
+                android:endX="44.5"
+                android:endY="46.5"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#C084FC" />
+                <item android:offset="1.0" android:color="#00E5FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Right Speed Pulse -->
+    <path
+        android:pathData="M61,32 L63.5,32 C64.9,32 66,33.1 66,34.5 L66,44 C66,45.4 64.9,46.5 63.5,46.5 C62.1,46.5 61,45.4 61,44 L61,32 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="63.5"
+                android:startY="32"
+                android:endX="63.5"
+                android:endY="46.5"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#38BDF8" />
+                <item android:offset="1.0" android:color="#00E5FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- LAYER 3: The Supersonic Download Mark (Crystalline Diamond Faceted Arrow) -->
+    <!-- Left Facet (Direct Light & Specular Sheen) -->
+    <path
+        android:pathData="M54,26 L50.5,26 L50.5,53 L43,56 L54,70 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="43"
+                android:startY="26"
+                android:endX="54"
+                android:endY="70"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFFF" />
+                <item android:offset="0.4" android:color="#E0F7FA" />
+                <item android:offset="1.0" android:color="#00E5FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Right Facet (Ambient Shadow & Rich Oceanic Depth) -->
+    <path
+        android:pathData="M54,26 L57.5,26 L57.5,53 L65,56 L54,70 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="54"
+                android:startY="26"
+                android:endX="65"
+                android:endY="70"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#E0F7FA" />
+                <item android:offset="0.5" android:color="#38BDF8" />
+                <item android:offset="1.0" android:color="#0284C7" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Core Center Seam & Precision Tip Glint -->
+    <path
+        android:strokeWidth="0.8"
+        android:strokeColor="#FFFFFF"
+        android:fillColor="#00000000"
+        android:pathData="M54,26 L54,70" />
+
+    <!-- Dynamic Focal Energy Dot at Convergence -->
+    <path
+        android:pathData="M54,77m-2.2,0a2.2,2.2 0 1,0 4.4,0a2.2,2.2 0 1,0 -4.4,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="54"
+                android:centerY="77"
+                android:gradientRadius="2.2"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#FFFFFF" />
+                <item android:offset="0.6" android:color="#00E5FF" />
+                <item android:offset="1.0" android:color="#00B4D8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

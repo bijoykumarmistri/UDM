@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UDM Brand In-App Logo Vector (64x64dp) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+
+    <!-- Ambient Glow / Backdrop -->
+    <path
+        android:pathData="M32,32m-28,0a28,28 0 1,0 56,0a28,28 0 1,0 -56,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="32"
+                android:centerY="32"
+                android:gradientRadius="28"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#2600E5FF" />
+                <item android:offset="0.6" android:color="#107C4DFF" />
+                <item android:offset="1.0" android:color="#00000000" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- The Outer "U" Hull -->
+    <path
+        android:pathData="M9,9 C9,5.5 19,5.5 19,9 L19,38 C19,45 25,51 32,51 C39,51 45,45 45,38 L45,9 C45,5.5 55,5.5 55,9 L55,40 C55,52 45,61 32,61 C19,61 9,52 9,40 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="9"
+                android:startY="6"
+                android:endX="55"
+                android:endY="61"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#A855F7" />
+                <item android:offset="0.35" android:color="#6366F1" />
+                <item android:offset="0.75" android:color="#00E5FF" />
+                <item android:offset="1.0" android:color="#00B4D8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Glassmorphic Edge Stroke -->
+    <path
+        android:strokeWidth="1.2"
+        android:strokeColor="#55FFFFFF"
+        android:fillColor="#00000000"
+        android:pathData="M10,10 L10,40 C10,51.5 19.5,60 32,60 C44.5,60 54,51.5 54,40 L54,10" />
+
+    <!-- Left Parallel Speed Pulse -->
+    <path
+        android:pathData="M22.5,10 L25,10 L25,22 C25,23.4 23.9,24.5 22.5,24.5 C21.1,24.5 20,23.4 20,22 L20,12.5 C20,11.1 21.1,10 22.5,10 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="22.5"
+                android:startY="10"
+                android:endX="22.5"
+                android:endY="24.5"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#C084FC" />
+                <item android:offset="1.0" android:color="#00E5FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Right Parallel Speed Pulse -->
+    <path
+        android:pathData="M39,10 L41.5,10 C42.9,10 44,11.1 44,12.5 L44,22 C44,23.4 42.9,24.5 41.5,24.5 C40.1,24.5 39,23.4 39,22 L39,10 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="41.5"
+                android:startY="10"
+                android:endX="41.5"
+                android:endY="24.5"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#38BDF8" />
+                <item android:offset="1.0" android:color="#00E5FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Supersonic Download Arrow - Left Facet -->
+    <path
+        android:pathData="M32,4 L28.5,4 L28.5,31 L21,34 L32,48 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="21"
+                android:startY="4"
+                android:endX="32"
+                android:endY="48"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFFF" />
+                <item android:offset="0.4" android:color="#E0F7FA" />
+                <item android:offset="1.0" android:color="#00E5FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Supersonic Download Arrow - Right Facet -->
+    <path
+        android:pathData="M32,4 L35.5,4 L35.5,31 L43,34 L32,48 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="32"
+                android:startY="4"
+                android:endX="43"
+                android:endY="48"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#E0F7FA" />
+                <item android:offset="0.5" android:color="#38BDF8" />
+                <item android:offset="1.0" android:color="#0284C7" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Center Seam Line -->
+    <path
+        android:strokeWidth="0.8"
+        android:strokeColor="#FFFFFF"
+        android:fillColor="#00000000"
+        android:pathData="M32,4 L32,48" />
+
+    <!-- Focal Energy Dot -->
+    <path
+        android:pathData="M32,55m-2.2,0a2.2,2.2 0 1,0 4.4,0a2.2,2.2 0 1,0 -4.4,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="32"
+                android:centerY="55"
+                android:gradientRadius="2.2"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#FFFFFF" />
+                <item android:offset="0.6" android:color="#00E5FF" />
+                <item android:offset="1.0" android:color="#00B4D8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UDM (Universal Download Manager) - Material You Themed Icon (Monochrome) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- The Outer "U" Hull -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M31,31 C31,27.5 41,27.5 41,31 L41,60 C41,67 47,73 54,73 C61,73 67,67 67,60 L67,31 C67,27.5 77,27.5 77,31 L77,62 C77,74 67,83 54,83 C41,83 31,74 31,62 Z" />
+
+    <!-- Supersonic Download Arrow -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,26 L50.5,26 L50.5,53 L43,56 L54,70 L65,56 L57.5,53 L57.5,26 Z" />
+
+    <!-- Left Speed Pulse -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44.5,32 L47,32 L47,44 C47,45.4 45.9,46.5 44.5,46.5 C43.1,46.5 42,45.4 42,44 L42,34.5 C42,33.1 43.1,32 44.5,32 Z" />
+
+    <!-- Right Speed Pulse -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M61,32 L63.5,32 C64.9,32 66,33.1 66,34.5 L66,44 C66,45.4 64.9,46.5 63.5,46.5 C62.1,46.5 61,45.4 61,44 L61,32 Z" />
+
+    <!-- Focal Energy Dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,77m-2,0a2,2 0 1,0 4,0a2,2 0 1,0 -4,0" />
+</vector>
