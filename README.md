@@ -4,6 +4,18 @@
   <b>High-Performance Native Android Download Accelerator, Multi-Engine Media Sniffer & Brave Shields-Grade Ad-Blocker</b>
 </p>
 
+<p align="center">
+  <a href="https://github.com/bijoykumarmistri/UDM/releases/latest">
+    <img src="https://img.shields.io/github/v/release/bijoykumarmistri/UDM?color=blue&label=Download%20APK&style=for-the-badge" alt="Download Latest APK" />
+  </a>
+</p>
+
+---
+
+### 📥 Direct Download (APK)
+Users can download and install the latest ready-to-run APK directly from the **[Releases](https://github.com/bijoykumarmistri/UDM/releases)** section.
+- **Direct Download link**: [Latest Release APK](https://github.com/bijoykumarmistri/UDM/releases/latest)
+
 ---
 
 ## 🌟 Key Features
