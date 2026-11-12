@@ -2,8 +2,9 @@ package com.universal.dm.ui.finished
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,14 +20,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,6 +43,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
@@ -49,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -58,7 +67,6 @@ import com.universal.dm.data.local.DownloadTaskEntity
 import com.universal.dm.data.model.MediaType
 import com.universal.dm.ui.theme.CodecAv1Badge
 import com.universal.dm.ui.theme.CodecM4aBadge
-import androidx.compose.ui.platform.LocalInspectionMode
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -85,7 +93,7 @@ fun FinishedScreen(
             completedTasks = emptyList(),
             previewTask = null,
             onPlayPreview = {},
-            onDeleteTask = {},
+            onDeleteTask = { _, _ -> },
             onDismissPreview = {}
         )
     } else {
@@ -98,7 +106,7 @@ fun FinishedScreen(
             completedTasks = completedTasks,
             previewTask = previewTask,
             onPlayPreview = { vm.selectTaskForPreview(it) },
-            onDeleteTask = { vm.deleteCompletedTask(it) },
+            onDeleteTask = { task, deleteFromStorage -> vm.deleteTask(task, deleteFromStorage) },
             onDismissPreview = { vm.selectTaskForPreview(null) }
         )
     }
@@ -111,18 +119,17 @@ fun FinishedScreenContent(
     completedTasks: List<DownloadTaskEntity>,
     previewTask: DownloadTaskEntity?,
     onPlayPreview: (DownloadTaskEntity) -> Unit,
-    onDeleteTask: (DownloadTaskEntity) -> Unit,
+    onDeleteTask: (DownloadTaskEntity, Boolean) -> Unit,
     onDismissPreview: () -> Unit
 ) {
     val context = LocalContext.current
-
     var selectedFilter by remember { mutableStateOf("All") }
-    val categories = listOf("All", "Videos (AV1/MP4)", "Audio (M4A/MP3)", "Files")
+    var taskToDelete by remember { mutableStateOf<DownloadTaskEntity?>(null) }
 
     val filteredList = remember(completedTasks, selectedFilter) {
         when (selectedFilter) {
-            "Videos (AV1/MP4)" -> completedTasks.filter { it.mediaType == MediaType.VIDEO }
-            "Audio (M4A/MP3)" -> completedTasks.filter { it.mediaType == MediaType.AUDIO }
+            "Videos" -> completedTasks.filter { it.mediaType == MediaType.VIDEO }
+            "Audios" -> completedTasks.filter { it.mediaType == MediaType.AUDIO }
             "Files" -> completedTasks.filter { it.mediaType == MediaType.DIRECT_FILE }
             else -> completedTasks
         }
@@ -132,21 +139,35 @@ fun FinishedScreenContent(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Spacer(modifier = Modifier.height(4.dp))
-            // Category Filter Chips
+            Column(modifier = Modifier.padding(top = 16.dp)) {
+                Text(
+                    text = "Library & Finished",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "${completedTasks.size} files downloaded • Tap to play • Press & hold for delete options",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // Quick Category Filter Chips
+        item {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth()
             ) {
-                items(categories) { cat ->
+                val categories = listOf("All", "Videos", "Audios", "Files")
+                items(categories) { category ->
                     FilterChip(
-                        selected = selectedFilter == cat,
-                        onClick = { selectedFilter = cat },
-                        label = { Text(cat) },
-                        shape = MaterialTheme.shapes.medium,
+                        selected = selectedFilter == category,
+                        onClick = { selectedFilter = category },
+                        label = { Text(category) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -156,41 +177,28 @@ fun FinishedScreenContent(
             }
         }
 
-        // Empty Library State
+        // Empty Library Placeholder
         if (filteredList.isEmpty()) {
             item {
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(top = 40.dp),
-                    shape = MaterialTheme.shapes.large,
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(280.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Column(
-                        modifier = Modifier.fillMaxWidth().padding(32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FolderOpen,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                        Text(
-                            text = "No Completed Media",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                        Icon(
+                            imageVector = Icons.Default.FolderOpen,
+                            contentDescription = null,
+                            modifier = Modifier.size(56.dp),
+                            tint = MaterialTheme.colorScheme.outline
                         )
                         Text(
-                            text = "Downloaded AV1 videos, M4A music, and files will appear here for instant in-app playback and sharing.",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "No completed downloads in this filter",
+                            style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -203,6 +211,7 @@ fun FinishedScreenContent(
             CompletedMediaCard(
                 task = task,
                 onPlayPreview = { onPlayPreview(task) },
+                onLongClick = { taskToDelete = task },
                 onShare = {
                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
                         type = if (task.mediaType == MediaType.VIDEO) "video/*" else if (task.mediaType == MediaType.AUDIO) "audio/*" else "*/*"
@@ -221,11 +230,104 @@ fun FinishedScreenContent(
                     }
                     context.startActivity(Intent.createChooser(shareIntent, "Share Media"))
                 },
-                onDelete = { onDeleteTask(task) }
+                onDeleteClick = { taskToDelete = task }
             )
         }
 
         item { Spacer(modifier = Modifier.height(32.dp)) }
+    }
+
+    // Delete Confirmation Dialog with Dual Delete Choices (Delete from App vs Delete from Storage)
+    taskToDelete?.let { task ->
+        AlertDialog(
+            onDismissRequest = { taskToDelete = null },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                    Text("Delete Downloaded File", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = task.fileName.ifEmpty { task.title },
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Choose how you want to delete this file:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Option 1: Delete from App & Device Storage
+                    Button(
+                        onClick = {
+                            onDeleteTask(task, true)
+                            taskToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteForever,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Delete from Storage & App")
+                    }
+
+                    // Option 2: Delete from App Only (Keeps physical file on disk)
+                    OutlinedButton(
+                        onClick = {
+                            onDeleteTask(task, false)
+                            taskToDelete = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.RemoveCircleOutline,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Delete from App Only (Keep File)")
+                    }
+
+                    // Cancel
+                    FilledTonalButton(
+                        onClick = { taskToDelete = null },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            },
+            dismissButton = null,
+            shape = RoundedCornerShape(24.dp)
+        )
     }
 
     // Media3 Player Modal Sheet
@@ -237,12 +339,14 @@ fun FinishedScreenContent(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CompletedMediaCard(
     task: DownloadTaskEntity,
     onPlayPreview: () -> Unit,
+    onLongClick: () -> Unit,
     onShare: () -> Unit,
-    onDelete: () -> Unit
+    onDeleteClick: () -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.getDefault()) }
     val dateText = remember(task.createdAt) { dateFormat.format(Date(task.createdAt)) }
@@ -258,7 +362,10 @@ fun CompletedMediaCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = isMedia, onClick = onPlayPreview),
+            .combinedClickable(
+                onClick = { if (isMedia) onPlayPreview() },
+                onLongClick = onLongClick
+            ),
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
@@ -319,7 +426,7 @@ fun CompletedMediaCard(
                     IconButton(onClick = onShare) {
                         Icon(imageVector = Icons.Default.Share, contentDescription = "Share", modifier = Modifier.size(20.dp))
                     }
-                    IconButton(onClick = onDelete) {
+                    IconButton(onClick = onDeleteClick) {
                         Icon(
                             imageVector = Icons.Default.Delete,
                             contentDescription = "Delete",
@@ -358,40 +465,16 @@ fun CompletedMediaCard(
                         onClick = onPlayPreview,
                         shape = MaterialTheme.shapes.medium
                     ) {
-                        Icon(imageVector = Icons.Default.PlayCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(
+                            imageVector = Icons.Default.PlayCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (task.mediaType == MediaType.VIDEO) "Watch Video" else "Listen Audio")
+                        Text("Play", fontWeight = FontWeight.Bold)
                     }
                 }
             }
-        }
-    }
-}
-
-@androidx.compose.ui.tooling.preview.Preview(showBackground = true)
-@Composable
-fun CompletedMediaCardPreview() {
-    com.universal.dm.ui.theme.UDMTheme {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CompletedMediaCard(
-                task = DownloadTaskEntity(
-                    id = "completed_sample",
-                    title = "Interstellar Main Theme Soundtrack (M4A AAC)",
-                    sourcePageUrl = "https://example.com/audio",
-                    downloadUrl = "https://example.com/audio.m4a",
-                    mediaType = MediaType.AUDIO,
-                    qualityLabel = "256 kbps",
-                    codecLabel = "M4A",
-                    fileName = "Interstellar_Theme.m4a",
-                    filePath = "/storage/emulated/0/Download/UDM/Interstellar_Theme.m4a",
-                    totalBytes = 18_400_000L,
-                    downloadedBytes = 18_400_000L,
-                    status = com.universal.dm.data.model.DownloadStatus.COMPLETED
-                ),
-                onPlayPreview = {},
-                onShare = {},
-                onDelete = {}
-            )
         }
     }
 }

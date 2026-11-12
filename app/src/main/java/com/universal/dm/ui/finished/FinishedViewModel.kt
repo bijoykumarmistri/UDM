@@ -28,11 +28,17 @@ class FinishedViewModel(application: Application) : AndroidViewModel(application
         _previewTask.value = task
     }
 
-    fun deleteCompletedTask(task: DownloadTaskEntity) {
+    /**
+     * Deletes the task entry from the database.
+     * If deleteFileFromStorage is true, also deletes the physical file from disk/storage.
+     */
+    fun deleteTask(task: DownloadTaskEntity, deleteFileFromStorage: Boolean) {
         viewModelScope.launch {
-            if (!task.filePath.startsWith("content://")) {
+            if (deleteFileFromStorage && !task.filePath.startsWith("content://")) {
                 val file = File(task.filePath)
-                if (file.exists()) file.delete()
+                if (file.exists()) {
+                    runCatching { file.delete() }
+                }
             }
             downloadDao.deleteTask(task)
         }

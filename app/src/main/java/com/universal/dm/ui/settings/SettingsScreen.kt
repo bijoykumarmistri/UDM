@@ -149,7 +149,7 @@ fun SettingsScreen(
 
                     Slider(
                         value = settings.threadCount.toFloat(),
-                        onValueChange = { settings.threadCount = it.roundToInt() },
+                        onValueChange = { settings.updateThreadCount(it.roundToInt()) },
                         valueRange = 1f..16f,
                         steps = 14
                     )
@@ -227,7 +227,7 @@ fun SettingsScreen(
 
                     Switch(
                         checked = settings.isAdBlockerEnabled,
-                        onCheckedChange = { settings.isAdBlockerEnabled = it }
+                        onCheckedChange = { settings.updateAdBlocker(it) }
                     )
                 }
 
@@ -261,7 +261,7 @@ fun SettingsScreen(
 
                     Switch(
                         checked = settings.blockPopupsAndRedirects,
-                        onCheckedChange = { settings.blockPopupsAndRedirects = it }
+                        onCheckedChange = { settings.updateBlockPopups(it) }
                     )
                 }
 
@@ -295,7 +295,7 @@ fun SettingsScreen(
 
                     Switch(
                         checked = settings.wifiOnlyDownloads,
-                        onCheckedChange = { settings.wifiOnlyDownloads = it }
+                        onCheckedChange = { settings.updateWifiOnly(it) }
                     )
                 }
             }
@@ -348,7 +348,7 @@ fun SettingsScreen(
 
                     Switch(
                         checked = settings.isDynamicColorEnabled,
-                        onCheckedChange = { settings.isDynamicColorEnabled = it }
+                        onCheckedChange = { settings.updateDynamicColor(it) }
                     )
                 }
 
@@ -383,7 +383,7 @@ fun SettingsScreen(
                     Switch(
                         checked = settings.isDarkThemeEnabled == true,
                         onCheckedChange = { isChecked ->
-                            settings.isDarkThemeEnabled = isChecked
+                            settings.updateDarkTheme(if (isChecked) true else null)
                         }
                     )
                 }
