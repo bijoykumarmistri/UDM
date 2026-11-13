@@ -426,6 +426,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // --- PAGE NAVIGATION & LIFECYCLE ---
 
     fun onPageStarted(url: String) {
+        if (url.isBlank() || url.equals("about:blank", ignoreCase = true)) return
+
         val activeId = _uiState.value.activeTabId
         _uiState.update { state ->
             val updatedTabs = state.tabs.map { tab ->
@@ -447,6 +449,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun onPageFinished(url: String, title: String?) {
+        if (url.isBlank() || url.equals("about:blank", ignoreCase = true)) return
+
         val activeId = _uiState.value.activeTabId
         val displayTitle = if (!title.isNullOrBlank()) title else url
         _uiState.update { state ->
@@ -562,7 +566,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 urlInput = "",
                 pageTitle = null,
                 detectedMediaState = null,
-                blockedAdsCount = 0
+                blockedAdsCount = 0,
+                isLoading = false
             )
         }
     }

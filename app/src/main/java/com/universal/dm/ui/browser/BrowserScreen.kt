@@ -214,10 +214,10 @@ private fun BrowserScreenContent(
                     val history = webView.copyBackForwardList()
                     val curIndex = history.currentIndex
                     if (curIndex <= 0) {
-                        viewModel.clearToHome()
                         webView.stopLoading()
                         webView.clearHistory()
-                        webView.loadUrl("about:blank")
+                        webViewInstance = null
+                        viewModel.clearToHome()
                     } else if (curIndex == 1) {
                         val curItem = history.getItemAtIndex(curIndex)
                         val prevItem = history.getItemAtIndex(0)
@@ -228,10 +228,10 @@ private fun BrowserScreenContent(
                         if (curHost == prevHost || prevUrl.contains("vimeo.com", ignoreCase = true)) {
                             // User originally opened Vimeo from home, and it redirected to index 1.
                             // Going back should directly return to Home dashboard!
-                            viewModel.clearToHome()
                             webView.stopLoading()
                             webView.clearHistory()
-                            webView.loadUrl("about:blank")
+                            webViewInstance = null
+                            viewModel.clearToHome()
                         } else {
                             webView.goBack()
                         }
@@ -255,10 +255,10 @@ private fun BrowserScreenContent(
                         }
                     }
                 } else {
-                    viewModel.clearToHome()
                     webViewInstance?.stopLoading()
                     webViewInstance?.clearHistory()
-                    webViewInstance?.loadUrl("about:blank")
+                    webViewInstance = null
+                    viewModel.clearToHome()
                 }
             }
             else -> {}
@@ -267,10 +267,10 @@ private fun BrowserScreenContent(
 
     val handleHomeNavigation: () -> Unit = {
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        viewModel.clearToHome()
         webViewInstance?.stopLoading()
         webViewInstance?.clearHistory()
-        webViewInstance?.loadUrl("about:blank")
+        webViewInstance = null
+        viewModel.clearToHome()
     }
 
     // Intercept back presses in WebView
@@ -502,10 +502,9 @@ private fun BrowserScreenContent(
 
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                     super.onPageStarted(view, url, favicon)
-                                    url?.let {
-                                        lastLoadedProgrammaticUrl = it
-                                        viewModel.onPageStarted(it)
-                                    }
+                                    if (url.isNullOrBlank() || url.equals("about:blank", ignoreCase = true)) return
+                                    lastLoadedProgrammaticUrl = url
+                                    viewModel.onPageStarted(url)
                                     viewModel.onNavigationStateChanged(canGoBack(), canGoForward())
                                 }
 
@@ -519,10 +518,9 @@ private fun BrowserScreenContent(
 
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     super.onPageFinished(view, url)
-                                    url?.let {
-                                        lastLoadedProgrammaticUrl = it
-                                        viewModel.onPageFinished(it, view?.title)
-                                    }
+                                    if (url.isNullOrBlank() || url.equals("about:blank", ignoreCase = true)) return
+                                    lastLoadedProgrammaticUrl = url
+                                    viewModel.onPageFinished(url, view?.title)
                                     viewModel.onNavigationStateChanged(canGoBack(), canGoForward())
 
                                     if (appSettings.isAdBlockerEnabled) {

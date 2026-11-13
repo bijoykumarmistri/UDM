@@ -123,18 +123,26 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
 
             val mediaType = if (isStreamingUrl) MediaType.VIDEO else MediaType.DIRECT_FILE
             val defaultExtension = if (isStreamingUrl) "mp4" else "bin"
-            val sanitizedName = if (fileName.isNotBlank()) {
-                if (fileName.contains(".")) fileName else "$fileName.$defaultExtension"
-            } else {
-                "udm_download_${System.currentTimeMillis()}.$defaultExtension"
+            val inferredName = runCatching {
+                val path = java.net.URI(url).path
+                path?.substringAfterLast('/')?.takeIf { it.isNotBlank() && it.contains('.') }
+            }.getOrNull()
+
+            val sanitizedName = when {
+                fileName.isNotBlank() -> if (fileName.contains('.')) fileName else "$fileName.$defaultExtension"
+                !inferredName.isNullOrBlank() -> inferredName
+                else -> "udm_download_${System.currentTimeMillis()}.$defaultExtension"
             }
 
+            val appSettings = com.universal.dm.ui.settings.AppSettingsState(getApplication())
+            val targetFolder = appSettings.defaultDownloadFolder.ifBlank { "/storage/emulated/0/Download/UDM" }
+
             downloadManager.enqueueDownload(
-                title = fileName.ifEmpty { if (isStreamingUrl) "Web Video Stream" else "Direct File Download" },
+                title = fileName.ifEmpty { inferredName ?: if (isStreamingUrl) "Web Video Stream" else "Direct File Download" },
                 sourcePageUrl = url,
                 downloadUrl = url,
                 fileName = sanitizedName,
-                destinationFolder = "/storage/emulated/0/Download/UDM",
+                destinationFolder = targetFolder,
                 mediaType = mediaType,
                 qualityLabel = if (isStreamingUrl) "1080p FHD" else "Standard",
                 codecLabel = if (isStreamingUrl) "AV1/H.264" else "Direct",
