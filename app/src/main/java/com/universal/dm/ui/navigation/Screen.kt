@@ -1,16 +1,24 @@
 package com.universal.dm.ui.navigation
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.ui.graphics.vector.ImageVector
 
+/**
+ * Universal Download Manager V2 Navigation Destinations.
+ * Reflects the 4 primary app pages:
+ * - [Browser]: Web Browser & Video/Audio Media Sniffer
+ * - [Downloads]: Active multi-threaded download queue & chunk monitor
+ * - [Finished]: Downloaded Media Library & built-in Media3 player
+ * - [Settings]: Engine preferences, network, adblocker & appearance
+ */
 enum class Screen(
     val route: String,
     val title: String,
@@ -26,7 +34,7 @@ enum class Screen(
     ),
     Downloads(
         route = "downloads",
-        title = "Downloads",
+        title = "Download",
         selectedIcon = Icons.Filled.Download,
         unselectedIcon = Icons.Outlined.Download,
         hasBadge = true
@@ -34,8 +42,8 @@ enum class Screen(
     Finished(
         route = "finished",
         title = "Finished",
-        selectedIcon = Icons.Filled.CheckCircle,
-        unselectedIcon = Icons.Outlined.CheckCircle
+        selectedIcon = Icons.Filled.Folder,
+        unselectedIcon = Icons.Outlined.Folder
     ),
     Settings(
         route = "settings",

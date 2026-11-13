@@ -28,9 +28,17 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
     private val _chunksMap = MutableStateFlow<Map<String, List<DownloadChunkEntity>>>(emptyMap())
     val chunksMap: StateFlow<Map<String, List<DownloadChunkEntity>>> = _chunksMap.asStateFlow()
 
+    private val _peakSpeed = MutableStateFlow(0L)
+    val peakSpeed: StateFlow<Long> = _peakSpeed.asStateFlow()
+
     init {
         viewModelScope.launch {
             activeTasks.collect { tasks ->
+                val currentTotalSpeed = tasks.sumOf { it.speedBytesPerSec }
+                if (currentTotalSpeed > _peakSpeed.value) {
+                    _peakSpeed.value = currentTotalSpeed
+                }
+
                 val newMap = mutableMapOf<String, List<DownloadChunkEntity>>()
                 tasks.forEach { task ->
                     newMap[task.id] = downloadDao.getChunksForTask(task.id)
@@ -75,6 +83,28 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
     fun cancelTask(taskId: String) {
         viewModelScope.launch {
             downloadManager.cancelDownload(taskId)
+        }
+    }
+
+    fun retryTask(taskId: String) {
+        viewModelScope.launch {
+            downloadManager.resumeDownload(taskId)
+        }
+    }
+
+    fun clearFailedTasks() {
+        viewModelScope.launch {
+            activeTasks.value.filter { it.status == DownloadStatus.FAILED }.forEach { task ->
+                downloadManager.cancelDownload(task.id)
+            }
+        }
+    }
+
+    fun cancelAll() {
+        viewModelScope.launch {
+            activeTasks.value.forEach { task ->
+                downloadManager.cancelDownload(task.id)
+            }
         }
     }
 

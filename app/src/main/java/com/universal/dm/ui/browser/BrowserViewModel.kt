@@ -1,11 +1,13 @@
 package com.universal.dm.ui.browser
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.universal.dm.data.model.DetectedPageMedia
 import com.universal.dm.domain.adblock.AdBlockerEngine
 import com.universal.dm.domain.sniffer.MediaSniffer
+import com.universal.dm.ui.settings.AppSettingsState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,7 +47,11 @@ data class BrowserUiState(
 
     // Browser Menu & Dialogs
     val isMenuExpanded: Boolean = false,
-    val isSearchEngineDialogVisible: Boolean = false
+    val isSearchEngineDialogVisible: Boolean = false,
+
+    // Custom Favourites
+    val favourites: List<FavouriteSite> = emptyList(),
+    val isPinSiteDialogVisible: Boolean = false
 ) {
     val activeTab: BrowserTab?
         get() = tabs.find { it.id == activeTabId }
@@ -57,9 +63,89 @@ data class BrowserUiState(
         get() = tabs.count { it.isIncognito }
 }
 
+/**
+ * Pinned user favourite site model with persistent storage support.
+ */
+data class FavouriteSite(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val url: String,
+    val badge: String = "Site",
+    val colorHex: String = "#00E5FF"
+)
+
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _uiState = MutableStateFlow(BrowserUiState())
+    private val prefs = application.getSharedPreferences("udm_app_settings", Context.MODE_PRIVATE)
+
+    companion object {
+        private const val KEY_FAVOURITES = "key_browser_favourites"
+    }
+
+    private fun loadSavedSearchEngine(): SearchEngine {
+        val savedName = prefs.getString(AppSettingsState.KEY_SEARCH_ENGINE, SearchEngine.DUCKDUCKGO.name)
+        return try {
+            SearchEngine.valueOf(savedName ?: SearchEngine.DUCKDUCKGO.name)
+        } catch (_: Exception) {
+            SearchEngine.DUCKDUCKGO
+        }
+    }
+
+    private fun defaultFavourites(): List<FavouriteSite> = listOf(
+        FavouriteSite(id = "fav_yt", title = "YouTube", url = "https://m.youtube.com", badge = "4K AV1", colorHex = "#FF0033"),
+        FavouriteSite(id = "fav_sc", title = "SoundCloud", url = "https://soundcloud.com", badge = "320k Audio", colorHex = "#FF5500"),
+        FavouriteSite(id = "fav_vm", title = "Vimeo", url = "https://vimeo.com", badge = "1080p Studio", colorHex = "#00ADEF"),
+        FavouriteSite(id = "fav_dm", title = "Dailymotion", url = "https://dailymotion.com", badge = "HD Stream", colorHex = "#0066DC"),
+        FavouriteSite(id = "fav_ar", title = "Archive.org", url = "https://archive.org", badge = "Public Domain", colorHex = "#EAA610"),
+        FavouriteSite(id = "fav_ddg", title = "DuckDuckGo", url = "https://duckduckgo.com", badge = "Privacy Search", colorHex = "#00B4D8")
+    )
+
+    private fun loadSavedFavourites(): List<FavouriteSite> {
+        val jsonString = prefs.getString(KEY_FAVOURITES, null)
+        if (jsonString.isNullOrBlank()) {
+            return defaultFavourites()
+        }
+        return try {
+            val array = org.json.JSONArray(jsonString)
+            val list = mutableListOf<FavouriteSite>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    FavouriteSite(
+                        id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                        title = obj.getString("title"),
+                        url = obj.getString("url"),
+                        badge = obj.optString("badge", "Site"),
+                        colorHex = obj.optString("colorHex", "#00E5FF")
+                    )
+                )
+            }
+            if (list.isEmpty()) defaultFavourites() else list
+        } catch (_: Exception) {
+            defaultFavourites()
+        }
+    }
+
+    private fun saveFavourites(list: List<FavouriteSite>) {
+        val array = org.json.JSONArray()
+        for (item in list) {
+            val obj = org.json.JSONObject()
+            obj.put("id", item.id)
+            obj.put("title", item.title)
+            obj.put("url", item.url)
+            obj.put("badge", item.badge)
+            obj.put("colorHex", item.colorHex)
+            array.put(obj)
+        }
+        prefs.edit().putString(KEY_FAVOURITES, array.toString()).apply()
+    }
+
+    private val _uiState = MutableStateFlow(
+        BrowserUiState(
+            selectedSearchEngine = loadSavedSearchEngine(),
+            favourites = loadSavedFavourites()
+        )
+    )
     val uiState: StateFlow<BrowserUiState> = _uiState.asStateFlow()
 
     val adBlockerEngine: AdBlockerEngine = AdBlockerEngine.getInstance(application)
@@ -251,8 +337,49 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun openTabSwitcher() {
+        _uiState.update { it.copy(isTabSwitcherOpen = true, isMenuExpanded = false) }
+    }
+
+    fun dismissTabSwitcher() {
+        _uiState.update { it.copy(isTabSwitcherOpen = false) }
+    }
+
     fun toggleTabSwitcher() {
         _uiState.update { it.copy(isTabSwitcherOpen = !it.isTabSwitcherOpen, isMenuExpanded = false) }
+    }
+
+    // --- FAVOURITES MANAGEMENT ---
+
+    fun pinFavourite(title: String, url: String, badge: String = "Site", colorHex: String = "#00E5FF") {
+        val cleanTitle = title.trim().ifBlank { "Site" }
+        var cleanUrl = url.trim()
+        if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+            cleanUrl = "https://$cleanUrl"
+        }
+        val newSite = FavouriteSite(
+            title = cleanTitle,
+            url = cleanUrl,
+            badge = badge,
+            colorHex = colorHex
+        )
+        _uiState.update { state ->
+            val updated = state.favourites + newSite
+            saveFavourites(updated)
+            state.copy(favourites = updated, isPinSiteDialogVisible = false)
+        }
+    }
+
+    fun removeFavourite(id: String) {
+        _uiState.update { state ->
+            val updated = state.favourites.filter { it.id != id }
+            saveFavourites(updated)
+            state.copy(favourites = updated)
+        }
+    }
+
+    fun setPinSiteDialogVisible(visible: Boolean) {
+        _uiState.update { it.copy(isPinSiteDialogVisible = visible, isMenuExpanded = false) }
     }
 
     fun setIncognitoMode(enabled: Boolean) {
@@ -267,6 +394,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // --- SEARCH ENGINE & PREFERENCES ---
 
     fun selectSearchEngine(engine: SearchEngine) {
+        prefs.edit().putString(AppSettingsState.KEY_SEARCH_ENGINE, engine.name).apply()
         _uiState.update {
             it.copy(
                 selectedSearchEngine = engine,

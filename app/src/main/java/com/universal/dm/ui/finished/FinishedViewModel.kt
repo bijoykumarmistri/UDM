@@ -43,4 +43,38 @@ class FinishedViewModel(application: Application) : AndroidViewModel(application
             downloadDao.deleteTask(task)
         }
     }
+
+    /**
+     * Deletes a collection of tasks from the database and optionally removes physical files.
+     */
+    fun deleteMultipleTasks(tasks: List<DownloadTaskEntity>, deleteFromStorage: Boolean) {
+        viewModelScope.launch {
+            tasks.forEach { task ->
+                if (deleteFromStorage && !task.filePath.startsWith("content://")) {
+                    val file = File(task.filePath)
+                    if (file.exists()) {
+                        runCatching { file.delete() }
+                    }
+                }
+                downloadDao.deleteTask(task)
+            }
+        }
+    }
+
+    /**
+     * Clears all completed downloads history.
+     */
+    fun clearAllHistory(deleteFromStorage: Boolean) {
+        viewModelScope.launch {
+            completedTasks.value.forEach { task ->
+                if (deleteFromStorage && !task.filePath.startsWith("content://")) {
+                    val file = File(task.filePath)
+                    if (file.exists()) {
+                        runCatching { file.delete() }
+                    }
+                }
+                downloadDao.deleteTask(task)
+            }
+        }
+    }
 }

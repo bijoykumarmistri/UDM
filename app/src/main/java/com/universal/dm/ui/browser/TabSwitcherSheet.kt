@@ -237,7 +237,6 @@ fun TabSwitcherSheet(
                                 .aspectRatio(1.25f)
                                 .clickable {
                                     onSelectTab(tab.id)
-                                    onDismiss()
                                 },
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(
@@ -341,7 +340,6 @@ fun TabSwitcherSheet(
                 FilledTonalButton(
                     onClick = {
                         onOpenNewTab(selectedCategory == 1)
-                        onDismiss()
                     },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(14.dp)

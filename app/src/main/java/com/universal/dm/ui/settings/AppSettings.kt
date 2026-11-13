@@ -23,6 +23,9 @@ class AppSettingsState(private val context: Context? = null) {
     var blockPopupsAndRedirects by mutableStateOf(prefs?.getBoolean(KEY_BLOCK_POPUPS, true) ?: true)
     var wifiOnlyDownloads by mutableStateOf(prefs?.getBoolean(KEY_WIFI_ONLY, false) ?: false)
     var isDynamicColorEnabled by mutableStateOf(prefs?.getBoolean(KEY_DYNAMIC_COLOR, true) ?: true)
+    var defaultSearchEngineName by mutableStateOf(prefs?.getString(KEY_SEARCH_ENGINE, "DUCKDUCKGO") ?: "DUCKDUCKGO")
+    var soundOnCompletion by mutableStateOf(prefs?.getBoolean(KEY_SOUND_COMPLETION, true) ?: true)
+    var autoResumeOnWifi by mutableStateOf(prefs?.getBoolean(KEY_AUTO_RESUME_WIFI, true) ?: true)
 
     // null means follow system theme, true = dark, false = light
     var isDarkThemeEnabled by mutableStateOf<Boolean?>(
@@ -74,6 +77,21 @@ class AppSettingsState(private val context: Context? = null) {
         }
     }
 
+    fun updateSearchEngine(engineName: String) {
+        defaultSearchEngineName = engineName
+        prefs?.edit()?.putString(KEY_SEARCH_ENGINE, engineName)?.apply()
+    }
+
+    fun updateSoundOnCompletion(enabled: Boolean) {
+        soundOnCompletion = enabled
+        prefs?.edit()?.putBoolean(KEY_SOUND_COMPLETION, enabled)?.apply()
+    }
+
+    fun updateAutoResumeOnWifi(enabled: Boolean) {
+        autoResumeOnWifi = enabled
+        prefs?.edit()?.putBoolean(KEY_AUTO_RESUME_WIFI, enabled)?.apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "udm_app_settings"
         private const val KEY_THREAD_COUNT = "key_thread_count"
@@ -83,6 +101,9 @@ class AppSettingsState(private val context: Context? = null) {
         private const val KEY_WIFI_ONLY = "key_wifi_only"
         private const val KEY_DYNAMIC_COLOR = "key_dynamic_color"
         private const val KEY_DARK_THEME = "key_dark_theme"
+        const val KEY_SEARCH_ENGINE = "key_search_engine"
+        private const val KEY_SOUND_COMPLETION = "key_sound_completion"
+        private const val KEY_AUTO_RESUME_WIFI = "key_auto_resume_wifi"
     }
 }
 
