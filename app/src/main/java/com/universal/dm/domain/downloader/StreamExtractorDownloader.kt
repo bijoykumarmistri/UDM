@@ -74,22 +74,34 @@ class StreamExtractorDownloader(
                 }
             }
         } else {
-            // Audio-only extraction
+            // High-Fidelity Audio-only extraction: extract target bitrate (e.g. 320, 256, 128, 64)
+            val targetBitrateKbps = Regex("(\\d+)").find(qualityLabel)?.value?.toIntOrNull() ?: 256
+            val bitrateStr = "${targetBitrateKbps}k"
+
+            // Best audio source selection: prioritize highest bitrate & frequency response available (Opus itag 251 48kHz or AAC itag 141/140)
+            request.addOption("-f", "bestaudio/best")
+            request.addOption("-x")
+
             when {
                 codecLabel.contains("M4A", ignoreCase = true) -> {
-                    request.addOption("-f", "bestaudio[ext=m4a]/bestaudio")
-                    request.addOption("-x")
                     request.addOption("--audio-format", "m4a")
+                    request.addOption("--audio-quality", bitrateStr)
                 }
                 codecLabel.contains("Opus", ignoreCase = true) -> {
-                    request.addOption("-f", "bestaudio")
-                    request.addOption("-x")
                     request.addOption("--audio-format", "opus")
+                    request.addOption("--audio-quality", bitrateStr)
+                }
+                codecLabel.contains("FLAC", ignoreCase = true) -> {
+                    request.addOption("--audio-format", "flac")
+                    request.addOption("--audio-quality", "0")
+                }
+                codecLabel.contains("WAV", ignoreCase = true) -> {
+                    request.addOption("--audio-format", "wav")
                 }
                 else -> {
-                    request.addOption("-f", "bestaudio")
-                    request.addOption("-x")
+                    // Default to high quality MP3 at requested target bitrate
                     request.addOption("--audio-format", "mp3")
+                    request.addOption("--audio-quality", bitrateStr)
                 }
             }
         }
@@ -100,11 +112,13 @@ class StreamExtractorDownloader(
         val startTime = System.currentTimeMillis()
 
         YoutubeDL.getInstance().execute(request, taskId) { progress, eta, line ->
-            // Check if FFmpeg has started merging separate video & audio streams
+            // Check if FFmpeg has started merging separate video & audio streams or extracting audio
             if (line.contains("Merging", ignoreCase = true) ||
                 line.contains("[Merger]", ignoreCase = true) ||
                 line.contains("[ffmpeg]", ignoreCase = true) ||
-                line.contains("Post-process", ignoreCase = true)
+                line.contains("[ExtractAudio]", ignoreCase = true) ||
+                line.contains("Post-process", ignoreCase = true) ||
+                line.contains("Destination:", ignoreCase = true)
             ) {
                 isMuxing = true
             }

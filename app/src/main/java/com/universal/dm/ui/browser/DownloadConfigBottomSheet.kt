@@ -346,51 +346,47 @@ fun DownloadConfigContent(
         val midKbpsVariant = detectedMedia.audioVariants.find { it.bitrateKbps in 120..192 } ?: detectedMedia.audioVariants.firstOrNull()
         val minKbpsVariant = detectedMedia.audioVariants.minByOrNull { it.bitrateKbps }
 
-        val highBytes = if ((maxKbpsVariant?.fileSizeBytes ?: 0L) > 0 && (maxKbpsVariant?.bitrateKbps ?: 0) in 240..320) {
-            maxKbpsVariant!!.fileSizeBytes
-        } else {
-            MediaSizeCalculator.calculateAudioTotalBytes(256, AudioCodec.M4A, duration)
-        }
-
-        val stdBytes = if ((midKbpsVariant?.fileSizeBytes ?: 0L) > 0 && (midKbpsVariant?.bitrateKbps ?: 0) in 120..192) {
-            midKbpsVariant!!.fileSizeBytes
-        } else {
-            MediaSizeCalculator.calculateAudioTotalBytes(128, AudioCodec.M4A, duration)
-        }
-
-        val saverBytes = if ((minKbpsVariant?.fileSizeBytes ?: 0L) > 0 && (minKbpsVariant?.bitrateKbps ?: 0) in 48..96) {
-            minKbpsVariant!!.fileSizeBytes
-        } else {
-            MediaSizeCalculator.calculateAudioTotalBytes(64, AudioCodec.M4A, duration)
-        }
+        val masterBytes = MediaSizeCalculator.calculateAudioTotalBytes(320, AudioCodec.M4A, duration)
+        val studioBytes = MediaSizeCalculator.calculateAudioTotalBytes(256, AudioCodec.M4A, duration)
+        val stdBytes = MediaSizeCalculator.calculateAudioTotalBytes(128, AudioCodec.M4A, duration)
+        val saverBytes = MediaSizeCalculator.calculateAudioTotalBytes(64, AudioCodec.M4A, duration)
 
         listOf(
             QualitySelectionItem(
-                label = "Studio Lossless",
-                subLabel = "${MediaSizeCalculator.formatFileSize(highBytes)} (~256 kbps)",
-                badge = "Audiophile",
-                badgeColor = Color(0xFFFFB300),
+                label = "320 kbps Master",
+                subLabel = "${MediaSizeCalculator.formatFileSize(masterBytes)} (Audiophile)",
+                badge = "Ultra Hi-Fi",
+                badgeColor = Color(0xFFFFD700),
                 height = 0,
-                bitrateKbps = 256,
-                matchedVariant = maxKbpsVariant?.copy(fileSizeBytes = highBytes) ?: maxKbpsVariant
+                bitrateKbps = 320,
+                matchedVariant = maxKbpsVariant?.copy(fileSizeBytes = masterBytes, bitrateKbps = 320) ?: maxKbpsVariant
             ),
             QualitySelectionItem(
-                label = "Standard Balanced",
-                subLabel = "${MediaSizeCalculator.formatFileSize(stdBytes)} (~128 kbps)",
+                label = "256 kbps Studio",
+                subLabel = "${MediaSizeCalculator.formatFileSize(studioBytes)} (High Fidelity)",
+                badge = "Studio Grade",
+                badgeColor = Color(0xFFB388FF),
+                height = 0,
+                bitrateKbps = 256,
+                matchedVariant = maxKbpsVariant?.copy(fileSizeBytes = studioBytes, bitrateKbps = 256) ?: maxKbpsVariant
+            ),
+            QualitySelectionItem(
+                label = "128 kbps Standard",
+                subLabel = "${MediaSizeCalculator.formatFileSize(stdBytes)} (Balanced)",
                 badge = "Crisp AAC",
                 badgeColor = Color(0xFF00E5FF),
                 height = 0,
                 bitrateKbps = 128,
-                matchedVariant = midKbpsVariant?.copy(fileSizeBytes = stdBytes) ?: midKbpsVariant
+                matchedVariant = midKbpsVariant?.copy(fileSizeBytes = stdBytes, bitrateKbps = 128) ?: midKbpsVariant
             ),
             QualitySelectionItem(
-                label = "Data Saver",
-                subLabel = "${MediaSizeCalculator.formatFileSize(saverBytes)} (~64 kbps)",
-                badge = "Compact",
+                label = "64 kbps Saver",
+                subLabel = "${MediaSizeCalculator.formatFileSize(saverBytes)} (Compact)",
+                badge = "Data Saver",
                 badgeColor = Color(0xFF4DD0E1),
                 height = 0,
                 bitrateKbps = 64,
-                matchedVariant = minKbpsVariant?.copy(fileSizeBytes = saverBytes) ?: minKbpsVariant
+                matchedVariant = minKbpsVariant?.copy(fileSizeBytes = saverBytes, bitrateKbps = 64) ?: minKbpsVariant
             )
         )
     }
@@ -398,18 +394,19 @@ fun DownloadConfigContent(
     // Selected Quality (Stage 2)
     val defaultVideoHeight = videoQualityOptions.firstOrNull()?.height ?: 1080
     var selectedHeight by remember(detectedMedia.pageUrl) { mutableIntStateOf(defaultVideoHeight) }
-    var selectedAudioTier by remember(detectedMedia.pageUrl) { mutableStateOf("standard") }
+    var selectedAudioTier by remember(detectedMedia.pageUrl) { mutableStateOf("studio") }
 
     val selectedQuality = if (selectedMediaType == MediaType.VIDEO) {
         videoQualityOptions.find { it.height == selectedHeight } ?: videoQualityOptions.firstOrNull()
     } else {
         audioQualityOptions.find {
             when (selectedAudioTier) {
-                "high" -> it.label.contains("Studio", ignoreCase = true) || it.label.contains("High", ignoreCase = true)
-                "saver" -> it.label.contains("Saver", ignoreCase = true)
-                else -> it.label.contains("Standard", ignoreCase = true)
+                "master" -> it.bitrateKbps == 320
+                "studio", "high" -> it.bitrateKbps == 256
+                "saver" -> it.bitrateKbps == 64
+                else -> it.bitrateKbps == 128
             }
-        } ?: audioQualityOptions.firstOrNull()
+        } ?: audioQualityOptions.find { it.bitrateKbps == 256 } ?: audioQualityOptions.firstOrNull()
     }
 
     // Selected Codec Name
@@ -500,60 +497,49 @@ fun DownloadConfigContent(
 
     val audioCodecOptions = remember(selectedQuality, detectedMedia.audioVariants, detectedMedia.durationSeconds) {
         val q = selectedQuality
-        val baseRate = q?.bitrateKbps ?: 128
+        val baseRate = q?.bitrateKbps ?: 256
         val duration = detectedMedia.durationSeconds
 
         val m4aMatch = detectedMedia.audioVariants.find { it.audioCodec == AudioCodec.M4A }
         val opusMatch = detectedMedia.audioVariants.find { it.audioCodec == AudioCodec.OPUS }
         val mp3Match = detectedMedia.audioVariants.find { it.audioCodec == AudioCodec.MP3 }
 
-        val m4aBytes = if ((m4aMatch?.fileSizeBytes ?: 0L) > 0 && m4aMatch?.bitrateKbps == baseRate) {
-            m4aMatch.fileSizeBytes
-        } else {
-            MediaSizeCalculator.calculateAudioTotalBytes(baseRate, AudioCodec.M4A, duration)
-        }
-
-        val opusBytes = if ((opusMatch?.fileSizeBytes ?: 0L) > 0 && opusMatch?.bitrateKbps == baseRate) {
-            opusMatch.fileSizeBytes
-        } else {
-            MediaSizeCalculator.calculateAudioTotalBytes(baseRate, AudioCodec.OPUS, duration)
-        }
-
-        val mp3Bytes = if ((mp3Match?.fileSizeBytes ?: 0L) > 0 && mp3Match?.bitrateKbps == baseRate) {
-            mp3Match.fileSizeBytes
-        } else {
-            MediaSizeCalculator.calculateAudioTotalBytes(baseRate, AudioCodec.MP3, duration)
-        }
+        val m4aBytes = MediaSizeCalculator.calculateAudioTotalBytes(baseRate, AudioCodec.M4A, duration)
+        val opusBytes = MediaSizeCalculator.calculateAudioTotalBytes(baseRate, AudioCodec.OPUS, duration)
+        val mp3Bytes = MediaSizeCalculator.calculateAudioTotalBytes(baseRate, AudioCodec.MP3, duration)
 
         listOf(
             CodecSelectionOption(
                 codecName = "M4A",
                 tag = "mp4a",
                 badge = "Apple & Android Native AAC • Recommended",
-                featureHighlight = "Native iOS/Android hardware decoding with crisp high frequencies",
+                featureHighlight = "Hardware-accelerated AAC encoding at $baseRate kbps with full fidelity",
                 sizeText = MediaSizeCalculator.formatFileSize(m4aBytes),
                 accentColor = CodecM4aBadge,
-                matchedVariant = m4aMatch?.copy(fileSizeBytes = m4aBytes) ?: q?.matchedVariant?.copy(fileSizeBytes = m4aBytes),
+                matchedVariant = m4aMatch?.copy(fileSizeBytes = m4aBytes, bitrateKbps = baseRate)
+                    ?: q?.matchedVariant?.copy(fileSizeBytes = m4aBytes, bitrateKbps = baseRate),
                 extension = "m4a"
             ),
             CodecSelectionOption(
                 codecName = "Opus",
                 tag = "opus",
-                badge = "Next-Gen Audio • Superior Low-Bitrate Clarity",
-                featureHighlight = "Ultra-low distortion audio codec created for modern streaming",
+                badge = "Next-Gen Audio • Pristine 48kHz Clarity",
+                featureHighlight = "Ultra-low distortion Opus stream at $baseRate kbps preserving studio harmonics",
                 sizeText = MediaSizeCalculator.formatFileSize(opusBytes),
                 accentColor = Color(0xFF38EF7D),
-                matchedVariant = opusMatch?.copy(fileSizeBytes = opusBytes) ?: q?.matchedVariant?.copy(fileSizeBytes = opusBytes),
+                matchedVariant = opusMatch?.copy(fileSizeBytes = opusBytes, bitrateKbps = baseRate)
+                    ?: q?.matchedVariant?.copy(fileSizeBytes = opusBytes, bitrateKbps = baseRate),
                 extension = "opus"
             ),
             CodecSelectionOption(
                 codecName = "MP3",
                 tag = "mp3",
                 badge = "Universal Legacy Audio • 320kbps Ready",
-                featureHighlight = "Compatible with older car receivers, hi-fi DACs, and legacy players",
+                featureHighlight = "LAME-encoded MP3 at $baseRate kbps for high-end audio gear and car stereos",
                 sizeText = MediaSizeCalculator.formatFileSize(mp3Bytes),
                 accentColor = Color(0xFFFFB300),
-                matchedVariant = mp3Match?.copy(fileSizeBytes = mp3Bytes) ?: q?.matchedVariant?.copy(fileSizeBytes = mp3Bytes),
+                matchedVariant = mp3Match?.copy(fileSizeBytes = mp3Bytes, bitrateKbps = baseRate)
+                    ?: q?.matchedVariant?.copy(fileSizeBytes = mp3Bytes, bitrateKbps = baseRate),
                 extension = "mp3"
             )
         )
@@ -565,7 +551,11 @@ fun DownloadConfigContent(
 
     // Sizing and Duration calculations for CTA & Gauge
     val finalCodecName = selectedCodec?.codecName ?: if (selectedMediaType == MediaType.VIDEO) "AV1" else "M4A"
-    val finalQualityLabel = selectedQuality?.label ?: if (selectedMediaType == MediaType.VIDEO) "1080p FHD" else "Standard"
+    val finalQualityLabel = if (selectedMediaType == MediaType.VIDEO) {
+        selectedQuality?.label ?: "1080p FHD"
+    } else {
+        "${selectedQuality?.bitrateKbps ?: 256} kbps"
+    }
     val finalExtension = selectedCodec?.extension ?: if (selectedMediaType == MediaType.VIDEO) "mp4" else "m4a"
 
     val finalTotalBytes = if (selectedMediaType == MediaType.VIDEO) {
@@ -584,7 +574,7 @@ fun DownloadConfigContent(
         selectedCodec?.matchedVariant?.fileSizeBytes?.takeIf { it > 0 }
             ?: selectedQuality?.matchedVariant?.fileSizeBytes?.takeIf { it > 0 }
             ?: MediaSizeCalculator.calculateAudioTotalBytes(
-                targetBitrateKbps = selectedQuality?.bitrateKbps ?: 128,
+                targetBitrateKbps = selectedQuality?.bitrateKbps ?: 256,
                 codec = when (finalCodecName) {
                     "Opus" -> AudioCodec.OPUS
                     "MP3" -> AudioCodec.MP3
@@ -1034,7 +1024,7 @@ fun DownloadConfigContent(
                     selectedHeight = highest
                     selectedCodecName = "AV1"
                 } else {
-                    selectedAudioTier = "high"
+                    selectedAudioTier = "master"
                     selectedCodecName = "M4A"
                 }
             }
@@ -1111,7 +1101,7 @@ fun DownloadConfigContent(
                             val isSelected = if (selectedMediaType == MediaType.VIDEO) {
                                 (selectedQuality?.height ?: -1) == item.height
                             } else {
-                                selectedQuality?.label == item.label
+                                selectedQuality?.bitrateKbps == item.bitrateKbps
                             }
 
                             val cardSource = remember { MutableInteractionSource() }
@@ -1140,9 +1130,10 @@ fun DownloadConfigContent(
                                     if (selectedMediaType == MediaType.VIDEO) {
                                         selectedHeight = item.height
                                     } else {
-                                        selectedAudioTier = when {
-                                            item.label.contains("Studio", ignoreCase = true) || item.label.contains("High", ignoreCase = true) -> "high"
-                                            item.label.contains("Saver", ignoreCase = true) -> "saver"
+                                        selectedAudioTier = when (item.bitrateKbps) {
+                                            320 -> "master"
+                                            256 -> "studio"
+                                            64 -> "saver"
                                             else -> "standard"
                                         }
                                     }

@@ -48,8 +48,15 @@ object DownloadEngineHelper {
         ensureNotificationChannel(context)
 
         val speedText = formatSpeed(speedBytesPerSec)
+        val isAudio = title.endsWith(".mp3", ignoreCase = true) ||
+                title.endsWith(".m4a", ignoreCase = true) ||
+                title.endsWith(".opus", ignoreCase = true) ||
+                title.endsWith(".flac", ignoreCase = true) ||
+                title.endsWith(".wav", ignoreCase = true)
+
         val contentText = when {
-            isMuxing -> "Merging AV1 & M4A Streams with FFmpeg..."
+            isMuxing && isAudio -> "Encoding High-Fidelity Audio with FFmpeg..."
+            isMuxing -> "Merging Video & Audio Streams with FFmpeg..."
             isIndeterminate -> "Initializing download streams..."
             else -> "$progressPercent% • $speedText"
         }

@@ -105,17 +105,36 @@ class UdmDownloadWorker(
                 }
             }
 
-            // Move completed file to public Downloads/UDM via MediaStore
+            // Determine exact MIME type & extension from the actual finished file
+            val fileExt = (completedFile.extension.ifEmpty { task.fileName.substringAfterLast('.', "") }).lowercase()
             val mimeType = when (task.mediaType) {
-                MediaType.VIDEO -> "video/mp4"
-                MediaType.AUDIO -> "audio/mp4"
+                MediaType.VIDEO -> when (fileExt) {
+                    "mkv" -> "video/x-matroska"
+                    "webm" -> "video/webm"
+                    "avi" -> "video/x-msvideo"
+                    else -> "video/mp4"
+                }
+                MediaType.AUDIO -> when (fileExt) {
+                    "mp3" -> "audio/mpeg"
+                    "opus", "ogg" -> "audio/ogg"
+                    "flac" -> "audio/flac"
+                    "wav" -> "audio/wav"
+                    else -> "audio/mp4"
+                }
                 MediaType.DIRECT_FILE -> "application/octet-stream"
+            }
+
+            // Ensure task.fileName has the correct extension matching the actual completed file
+            val finalFileName = if (fileExt.isNotEmpty() && !task.fileName.endsWith(".$fileExt", ignoreCase = true)) {
+                "${task.fileName.substringBeforeLast('.')}.$fileExt"
+            } else {
+                task.fileName
             }
 
             val finalPublicPath = DownloadEngineHelper.saveFileToPublicDownloads(
                 context = applicationContext,
                 sourceFile = completedFile,
-                fileName = task.fileName,
+                fileName = finalFileName,
                 mimeType = mimeType
             )
 
@@ -124,6 +143,7 @@ class UdmDownloadWorker(
             val updatedTask = task.copy(
                 status = DownloadStatus.COMPLETED,
                 filePath = finalPublicPath,
+                fileName = finalFileName,
                 downloadedBytes = if (finalBytes > 0) finalBytes else task.downloadedBytes,
                 totalBytes = if (finalBytes > 0) finalBytes else task.totalBytes,
                 speedBytesPerSec = 0L
