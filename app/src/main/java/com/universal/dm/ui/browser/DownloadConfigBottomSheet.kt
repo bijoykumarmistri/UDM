@@ -225,7 +225,7 @@ fun DownloadConfigContent(
     var isAdvancedExpanded by remember { mutableStateOf(false) }
     var selectedThreadCount by remember { mutableIntStateOf(appSettings.threadCount.coerceIn(1, 16)) }
     var destinationFolder by remember { mutableStateOf(appSettings.defaultDownloadFolder) }
-    var isWifiOnly by remember { mutableStateOf(false) }
+    var isWifiOnly by remember { mutableStateOf(appSettings.wifiOnlyDownloads) }
 
     // Storage calculation
     val freeStorageBytes = remember {
@@ -1438,14 +1438,22 @@ fun DownloadConfigContent(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Bolt,
-                                        contentDescription = null,
-                                        tint = Color(0xFF00E5FF),
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFF00E5FF).copy(alpha = 0.12f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Bolt,
+                                            contentDescription = null,
+                                            tint = Color(0xFF00E5FF),
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
                                     Text(
                                         text = "Multi-Socket Accelerator",
                                         style = MaterialTheme.typography.bodyMedium,
@@ -1481,47 +1489,71 @@ fun DownloadConfigContent(
                             )
                         }
 
-                        // Wi-Fi Only Toggle
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        // Wi-Fi Only Toggle (Enhanced pill container with zero text-switch overlap)
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF07131D),
+                            border = BorderStroke(1.dp, Color(0xFF162D3E)),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Wifi,
-                                    contentDescription = null,
-                                    tint = Color(0xFF00E5FF),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Column {
-                                    Text(
-                                        text = "Download on Wi-Fi Only",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color.White
-                                    )
-                                    Text(
-                                        text = "Wait for Wi-Fi connection to prevent cellular data charges",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Color(0xFF7591A3)
-                                    )
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xFF00E5FF).copy(alpha = 0.12f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Wifi,
+                                            contentDescription = null,
+                                            tint = Color(0xFF00E5FF),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Download on Wi-Fi Only",
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                        )
+                                        Text(
+                                            text = "Wait for Wi-Fi connection to prevent cellular data charges",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF7591A3)
+                                        )
+                                    }
                                 }
-                            }
 
-                            Switch(
-                                checked = isWifiOnly,
-                                onCheckedChange = { isWifiOnly = it },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color(0xFF00E5FF),
-                                    checkedTrackColor = Color(0xFF004D59),
-                                    uncheckedThumbColor = Color(0xFF6B8799),
-                                    uncheckedTrackColor = Color(0xFF142B3A)
+                                Switch(
+                                    checked = isWifiOnly,
+                                    onCheckedChange = {
+                                        isWifiOnly = it
+                                        appSettings.wifiOnlyDownloads = it
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color(0xFF00E5FF),
+                                        checkedTrackColor = Color(0xFF004D59),
+                                        uncheckedThumbColor = Color(0xFF6B8799),
+                                        uncheckedTrackColor = Color(0xFF142B3A)
+                                    )
                                 )
-                            )
+                            }
                         }
 
                         // Destination Directory
