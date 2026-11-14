@@ -15,6 +15,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -25,6 +26,17 @@ class HttpChunkDownloader(
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(true)
+        .addInterceptor { chain ->
+            val original = chain.request()
+            val requestBuilder = original.newBuilder()
+            if (original.header("User-Agent") == null) {
+                requestBuilder.header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                )
+            }
+            chain.proceed(requestBuilder.build())
+        }
         .build()
 ) {
 
@@ -33,10 +45,11 @@ class HttpChunkDownloader(
         url: String,
         targetFile: File,
         requestedThreadCount: Int,
+        referer: String? = null,
         onProgress: suspend (downloadedBytes: Long, totalBytes: Long, speedBytesPerSec: Long) -> Unit
     ): File = withContext(Dispatchers.IO) {
         // 1. Probe Server Headers (HEAD request with Range fallback)
-        val probeResult = probeServer(url)
+        val probeResult = probeServer(url, referer)
         val contentLength = probeResult.contentLength
         val supportsRanges = probeResult.supportsRanges && contentLength > 0L
 
@@ -47,6 +60,7 @@ class HttpChunkDownloader(
                 targetFile = targetFile,
                 contentLength = contentLength,
                 requestedThreadCount = requestedThreadCount,
+                referer = referer,
                 onProgress = onProgress
             )
         } else {
@@ -55,6 +69,7 @@ class HttpChunkDownloader(
                 url = url,
                 targetFile = targetFile,
                 contentLength = contentLength,
+                referer = referer,
                 onProgress = onProgress
             )
         }
@@ -66,6 +81,7 @@ class HttpChunkDownloader(
         targetFile: File,
         contentLength: Long,
         requestedThreadCount: Int,
+        referer: String? = null,
         onProgress: suspend (Long, Long, Long) -> Unit
     ): File = coroutineScope {
         // Pre-allocate file space
@@ -133,6 +149,7 @@ class HttpChunkDownloader(
                         chunk = chunk,
                         url = url,
                         targetFile = targetFile,
+                        referer = referer,
                         downloadedCounter = downloadedCounter
                     )
                 }
@@ -153,6 +170,7 @@ class HttpChunkDownloader(
         chunk: DownloadChunkEntity,
         url: String,
         targetFile: File,
+        referer: String? = null,
         downloadedCounter: AtomicLong
     ) {
         val start = chunk.currentByte
@@ -162,9 +180,17 @@ class HttpChunkDownloader(
         val request = Request.Builder()
             .url(url)
             .addHeader("Range", "bytes=$start-$end")
+            .apply {
+                if (!referer.isNullOrBlank()) {
+                    addHeader("Referer", referer)
+                }
+            }
             .build()
 
         val response = okHttpClient.newCall(request).execute()
+        if (!response.isSuccessful && response.code != 206) {
+            throw IOException("Unexpected HTTP code ${response.code} for chunk ${chunk.threadIndex}")
+        }
         val body = response.body ?: throw IllegalStateException("Empty response body for chunk ${chunk.threadIndex}")
 
         val buffer = ByteArray(32 * 1024)
@@ -202,10 +228,21 @@ class HttpChunkDownloader(
         url: String,
         targetFile: File,
         contentLength: Long,
+        referer: String? = null,
         onProgress: suspend (Long, Long, Long) -> Unit
     ): File = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(url).build()
+        val request = Request.Builder()
+            .url(url)
+            .apply {
+                if (!referer.isNullOrBlank()) {
+                    addHeader("Referer", referer)
+                }
+            }
+            .build()
         val response = okHttpClient.newCall(request).execute()
+        if (!response.isSuccessful) {
+            throw IOException("Unexpected HTTP code ${response.code} downloading stream")
+        }
         val body = response.body ?: throw IllegalStateException("Empty response body")
 
         val total = if (contentLength > 0) contentLength else body.contentLength()
@@ -243,26 +280,44 @@ class HttpChunkDownloader(
         targetFile
     }
 
-    private fun probeServer(url: String): ProbeResult {
+    private fun probeServer(url: String, referer: String? = null): ProbeResult {
         return try {
-            val headReq = Request.Builder().url(url).head().build()
-            val response = okHttpClient.newCall(headReq).execute()
+            val headReq = Request.Builder()
+                .url(url)
+                .apply {
+                    if (!referer.isNullOrBlank()) {
+                        addHeader("Referer", referer)
+                    }
+                }
+                .head()
+                .build()
+            val (length, acceptsRanges, isHeadSuccess) = okHttpClient.newCall(headReq).execute().use { response ->
+                val accepts = response.header("Accept-Ranges")?.equals("bytes", ignoreCase = true) == true ||
+                        response.header("Content-Range") != null
+                val len = response.header("Content-Length")?.toLongOrNull() ?: 0L
+                Triple(len, accepts, response.isSuccessful)
+            }
 
-            val acceptsRanges = response.header("Accept-Ranges")?.equals("bytes", ignoreCase = true) == true ||
-                    response.header("Content-Range") != null
-            val length = response.header("Content-Length")?.toLongOrNull() ?: 0L
-
-            if (length > 0) {
+            if (length > 0 && isHeadSuccess) {
                 ProbeResult(length, acceptsRanges)
             } else {
                 // If HEAD had no length, probe with a 1-byte range GET
-                val rangeReq = Request.Builder().url(url).addHeader("Range", "bytes=0-0").build()
-                val rangeResp = okHttpClient.newCall(rangeReq).execute()
-                val rangeHeader = rangeResp.header("Content-Range")
-                val totalLength = rangeHeader?.substringAfterLast('/')?.toLongOrNull() ?: 0L
-                val isRangeAccepted = rangeResp.code == 206 || rangeHeader != null
+                val rangeReq = Request.Builder()
+                    .url(url)
+                    .addHeader("Range", "bytes=0-0")
+                    .apply {
+                        if (!referer.isNullOrBlank()) {
+                            addHeader("Referer", referer)
+                        }
+                    }
+                    .build()
+                okHttpClient.newCall(rangeReq).execute().use { rangeResp ->
+                    val rangeHeader = rangeResp.header("Content-Range")
+                    val totalLength = rangeHeader?.substringAfterLast('/')?.toLongOrNull() ?: 0L
+                    val isRangeAccepted = rangeResp.code == 206 || rangeHeader != null
 
-                ProbeResult(totalLength, isRangeAccepted)
+                    ProbeResult(totalLength, isRangeAccepted)
+                }
             }
         } catch (_: Exception) {
             ProbeResult(0L, false)

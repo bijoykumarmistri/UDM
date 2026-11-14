@@ -2,21 +2,18 @@ package com.universal.dm.ui.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
  * Universal Download Manager V2 Navigation Destinations.
- * Reflects the 4 primary app pages:
+ * Reflects the 3 primary app pages:
  * - [Browser]: Web Browser & Video/Audio Media Sniffer
- * - [Downloads]: Active multi-threaded download queue & chunk monitor
- * - [Finished]: Downloaded Media Library & built-in Media3 player
+ * - [Downloads]: Unified Downloads Hub (Active download queue & Finished media library)
  * - [Settings]: Engine preferences, network, adblocker & appearance
  */
 enum class Screen(
@@ -34,16 +31,10 @@ enum class Screen(
     ),
     Downloads(
         route = "downloads",
-        title = "Download",
+        title = "Downloads",
         selectedIcon = Icons.Filled.Download,
         unselectedIcon = Icons.Outlined.Download,
         hasBadge = true
-    ),
-    Finished(
-        route = "finished",
-        title = "Finished",
-        selectedIcon = Icons.Filled.Folder,
-        unselectedIcon = Icons.Outlined.Folder
     ),
     Settings(
         route = "settings",

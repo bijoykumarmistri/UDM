@@ -26,7 +26,9 @@ class StreamExtractorDownloader(
         mediaType: MediaType,
         qualityLabel: String,
         codecLabel: String,
+        formatId: String? = null,
         threadCount: Int,
+        referer: String? = null,
         onProgress: suspend (progressPercent: Int, speedBytesPerSec: Long, isMuxing: Boolean) -> Unit
     ): File = withContext(Dispatchers.IO) {
         if (!outputDirectory.exists()) outputDirectory.mkdirs()
@@ -44,34 +46,59 @@ class StreamExtractorDownloader(
         request.addOption("--retries", "10")
         request.addOption("--fragment-retries", "10")
         request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+        if (!referer.isNullOrBlank() && !referer.equals(url, ignoreCase = true)) {
+            request.addOption("--referer", referer)
+        }
 
-        // Extract target height (e.g. 2160, 1440, 1080, 720)
+        // Extract target height (e.g. 2160, 1440, 1080, 720, 480)
         val height = Regex("\\d+").find(qualityLabel)?.value?.toIntOrNull() ?: 1080
 
+        val isYouTube = url.contains("youtube.com", ignoreCase = true) ||
+                url.contains("youtu.be", ignoreCase = true)
+
         if (mediaType == MediaType.VIDEO) {
-            when {
-                codecLabel.contains("AV1", ignoreCase = true) -> {
-                    request.addOption(
-                        "-f",
-                        "bestvideo[height<=$height][vcodec^=av01]+bestaudio[ext=m4a]/bestvideo[height<=$height][vcodec^=av01]+bestaudio/bestvideo[height<=$height]+bestaudio/best"
-                    )
-                    request.addOption("--merge-output-format", "mp4")
+            if (isYouTube) {
+                // Priority format ID if provided from stream sniffer
+                val formatIdPrefix = if (!formatId.isNullOrBlank() && formatId != "direct" && formatId != "video" && formatId != "hls" && formatId != "stream") {
+                    "$formatId+bestaudio/$formatId/"
+                } else ""
+
+                when {
+                    codecLabel.contains("AV1", ignoreCase = true) -> {
+                        request.addOption(
+                            "-f",
+                            "${formatIdPrefix}bestvideo[height<=$height][vcodec^=av01]+bestaudio[ext=m4a]/bestvideo[height<=$height][vcodec^=av01]+bestaudio/bestvideo[height<=$height]+bestaudio/best[height<=$height]/bestvideo[height<=$height]/best"
+                        )
+                        request.addOption("--merge-output-format", "mp4")
+                    }
+                    codecLabel.contains("VP9", ignoreCase = true) -> {
+                        request.addOption(
+                            "-f",
+                            "${formatIdPrefix}bestvideo[height<=$height][vcodec^=vp]+bestaudio[ext=m4a]/bestvideo[height<=$height][vcodec^=vp]+bestaudio/bestvideo[height<=$height]+bestaudio/best[height<=$height]/bestvideo[height<=$height]/best"
+                        )
+                        request.addOption("--merge-output-format", "mkv")
+                    }
+                    else -> {
+                        // Standard H.264 Universal
+                        request.addOption(
+                            "-f",
+                            "${formatIdPrefix}bestvideo[height<=$height][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=$height]+bestaudio[ext=m4a]/bestvideo[height<=$height]+bestaudio/best[height<=$height]/bestvideo[height<=$height]/best"
+                        )
+                        request.addOption("--merge-output-format", "mp4")
+                    }
                 }
-                codecLabel.contains("VP9", ignoreCase = true) -> {
-                    request.addOption(
-                        "-f",
-                        "bestvideo[height<=$height][vcodec^=vp]+bestaudio[ext=m4a]/bestvideo[height<=$height][vcodec^=vp]+bestaudio/bestvideo[height<=$height]+bestaudio/best"
-                    )
-                    request.addOption("--merge-output-format", "mkv")
+            } else {
+                // Non-YouTube / Generic / HLS stream extraction: resilient format selection
+                val formatSpec = when {
+                    !formatId.isNullOrBlank() && formatId != "direct" && formatId != "video" && formatId != "hls" && formatId != "stream" -> {
+                        "$formatId/best[height<=$height]/bestvideo[height<=$height]+bestaudio/best/bestvideo+bestaudio"
+                    }
+                    else -> {
+                        "best[height<=$height]/bestvideo[height<=$height]+bestaudio/best/bestvideo+bestaudio"
+                    }
                 }
-                else -> {
-                    // Standard H.264 Universal
-                    request.addOption(
-                        "-f",
-                        "bestvideo[height<=$height][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=$height]+bestaudio[ext=m4a]/bestvideo[height<=$height]+bestaudio/best"
-                    )
-                    request.addOption("--merge-output-format", "mp4")
-                }
+                request.addOption("-f", formatSpec)
+                request.addOption("--merge-output-format", "mp4")
             }
         } else {
             // High-Fidelity Audio-only extraction: extract target bitrate (e.g. 320, 256, 128, 64)
@@ -108,10 +135,14 @@ class StreamExtractorDownloader(
 
         var isMuxing = false
         var lastDbUpdateTime = 0L
+        var lastOutputLine = ""
 
         val startTime = System.currentTimeMillis()
 
-        YoutubeDL.getInstance().execute(request, taskId) { progress, eta, line ->
+        YoutubeDL.getInstance().execute(request, taskId) { progress, _, line ->
+            lastOutputLine = line
+            Log.d("StreamDownloader", "yt-dlp [$taskId]: $line")
+
             // Check if FFmpeg has started merging separate video & audio streams or extracting audio
             if (line.contains("Merging", ignoreCase = true) ||
                 line.contains("[Merger]", ignoreCase = true) ||
@@ -187,7 +218,7 @@ class StreamExtractorDownloader(
         }
 
         if (finishedFile == null || !finishedFile.exists()) {
-            throw IllegalStateException("Download finished but final media file was not found")
+            throw IllegalStateException("Download finished but final media file was not found${if (lastOutputLine.isNotBlank()) " (yt-dlp output: $lastOutputLine)" else ""}")
         }
 
         Log.d("StreamDownloader", "Successfully produced media file: ${finishedFile.absolutePath} (${finishedFile.length()} bytes)")

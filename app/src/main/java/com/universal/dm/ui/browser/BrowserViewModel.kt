@@ -8,6 +8,7 @@ import com.universal.dm.data.model.DetectedPageMedia
 import com.universal.dm.domain.adblock.AdBlockerEngine
 import com.universal.dm.domain.sniffer.MediaSniffer
 import com.universal.dm.ui.settings.AppSettingsState
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -140,16 +141,26 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         prefs.edit().putString(KEY_FAVOURITES, array.toString()).apply()
     }
 
-    private val _uiState = MutableStateFlow(
-        BrowserUiState(
-            selectedSearchEngine = loadSavedSearchEngine(),
-            favourites = loadSavedFavourites()
+    private val _uiState = run {
+        val engine = loadSavedSearchEngine()
+        val initialTab = BrowserTab(title = "New Tab", url = null, isIncognito = false)
+        MutableStateFlow(
+            BrowserUiState(
+                selectedSearchEngine = engine,
+                favourites = loadSavedFavourites(),
+                tabs = listOf(initialTab),
+                activeTabId = initialTab.id,
+                currentLoadedUrl = null,
+                urlInput = ""
+            )
         )
-    )
+    }
     val uiState: StateFlow<BrowserUiState> = _uiState.asStateFlow()
 
     val adBlockerEngine: AdBlockerEngine = AdBlockerEngine.getInstance(application)
     val mediaSniffer: MediaSniffer = MediaSniffer()
+
+    private var mediaExtractionJob: Job? = null
 
     fun onUrlInputChanged(newInput: String) {
         _uiState.update { it.copy(urlInput = newInput) }
@@ -182,10 +193,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 detectedMediaState = null,
                 isTabSwitcherOpen = false
             )
-        }
-
-        if (mediaSniffer.isMediaOrDownloadableUrl(finalUrl)) {
-            triggerMediaExtraction(finalUrl, null)
         }
     }
 
@@ -225,9 +232,10 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     // --- TAB MANAGEMENT ---
 
     fun openNewTab(isIncognito: Boolean = _uiState.value.isIncognito, initialUrl: String? = null) {
+        val targetUrl = initialUrl
         val newTab = BrowserTab(
-            title = if (initialUrl != null) "Loading..." else if (isIncognito) "Incognito" else "New Tab",
-            url = initialUrl,
+            title = if (isIncognito) "Incognito" else "New Tab",
+            url = targetUrl,
             isIncognito = isIncognito
         )
         _uiState.update { state ->
@@ -235,9 +243,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 tabs = state.tabs + newTab,
                 activeTabId = newTab.id,
                 isIncognito = isIncognito,
-                currentLoadedUrl = initialUrl,
-                urlInput = initialUrl ?: "",
-                pageTitle = if (initialUrl != null) null else newTab.title,
+                currentLoadedUrl = targetUrl,
+                urlInput = targetUrl ?: "",
+                pageTitle = if (!targetUrl.isNullOrEmpty()) null else newTab.title,
                 canGoBack = false,
                 canGoForward = false,
                 blockedAdsCount = 0,
@@ -246,8 +254,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             )
         }
 
-        if (initialUrl != null) {
-            loadUrl(initialUrl)
+        if (!targetUrl.isNullOrEmpty()) {
+            loadUrl(targetUrl)
         }
     }
 
@@ -273,8 +281,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         _uiState.update { state ->
             val remainingTabs = state.tabs.filter { it.id != tabId }
             if (remainingTabs.isEmpty()) {
-                // If all tabs closed, start fresh tab
-                val fresh = BrowserTab(title = "New Tab", isIncognito = state.isIncognito)
+                // If all tabs closed, start fresh tab defaulting to clean Start Page
+                val fresh = BrowserTab(title = "New Tab", url = null, isIncognito = state.isIncognito)
                 state.copy(
                     tabs = listOf(fresh),
                     activeTabId = fresh.id,
@@ -310,7 +318,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 emptyList()
             }
             if (remaining.isEmpty()) {
-                val fresh = BrowserTab(title = "New Tab", isIncognito = false)
+                val fresh = BrowserTab(title = "New Tab", url = null, isIncognito = false)
                 state.copy(
                     tabs = listOf(fresh),
                     activeTabId = fresh.id,
@@ -425,7 +433,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     // --- PAGE NAVIGATION & LIFECYCLE ---
 
-    fun onPageStarted(url: String) {
+    fun onPageStarted(url: String, isAutoSniffEnabled: Boolean = false) {
         if (url.isBlank() || url.equals("about:blank", ignoreCase = true)) return
 
         val activeId = _uiState.value.activeTabId
@@ -443,12 +451,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 blockedAdsCount = 0
             )
         }
-        if (mediaSniffer.isMediaOrDownloadableUrl(url)) {
+        if (isAutoSniffEnabled && mediaSniffer.isMediaOrDownloadableUrl(url)) {
             triggerMediaExtraction(url, null)
         }
     }
 
-    fun onPageFinished(url: String, title: String?) {
+    fun onPageFinished(url: String, title: String?, isAutoSniffEnabled: Boolean = false) {
         if (url.isBlank() || url.equals("about:blank", ignoreCase = true)) return
 
         val activeId = _uiState.value.activeTabId
@@ -466,7 +474,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 isLoading = false
             )
         }
-        if (mediaSniffer.isMediaOrDownloadableUrl(url) || _uiState.value.autoOpenBottomSheetOnMediaDetected) {
+        if ((isAutoSniffEnabled && mediaSniffer.isMediaOrDownloadableUrl(url)) || _uiState.value.autoOpenBottomSheetOnMediaDetected) {
             triggerMediaExtraction(url, title, autoShowBottomSheet = _uiState.value.autoOpenBottomSheetOnMediaDetected)
         }
     }
@@ -510,30 +518,50 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun triggerMediaExtraction(url: String, fallbackTitle: String?, autoShowBottomSheet: Boolean = false) {
-        // Prevent re-triggering if we already extracted media for this exact page or if an extraction is active
+        android.util.Log.d("BrowserViewModel", "triggerMediaExtraction called for: $url, autoShow: $autoShowBottomSheet")
+        // Prevent re-triggering if we already extracted media for this exact page or if an extraction is actively in progress
         val currentMedia = _uiState.value.detectedMediaState
         if (currentMedia != null && currentMedia.pageUrl == url && currentMedia.videoVariants.size > 1) {
+            android.util.Log.d("BrowserViewModel", "Already have extracted media for $url")
             if (autoShowBottomSheet) {
                 _uiState.update { it.copy(showMediaBottomSheet = true) }
             }
             return
         }
 
-        viewModelScope.launch {
+        mediaExtractionJob?.cancel()
+        mediaExtractionJob = viewModelScope.launch {
             _uiState.update { it.copy(isExtractingMedia = true) }
+            android.util.Log.d("BrowserViewModel", "Launching extractMedia for: $url")
             val media = mediaSniffer.extractMedia(url, fallbackTitle)
+            android.util.Log.d("BrowserViewModel", "extractMedia finished for $url. Result media != null: ${media != null}, videoVariants: ${media?.videoVariants?.size ?: 0}")
+            val hasRealStreams = media != null && (
+                media.videoVariants.isNotEmpty() ||
+                media.audioVariants.isNotEmpty() ||
+                media.directFileUrl != null ||
+                media.directFileVariant != null
+            )
+            val validMedia = if (hasRealStreams) media else null
+
             _uiState.update { current ->
-                // Guard: only overwrite if newly extracted media has more or equal variants
-                val oldVariantsCount = current.detectedMediaState?.videoVariants?.size ?: 0
+                val oldVariantsCount = (current.detectedMediaState?.videoVariants?.size ?: 0) +
+                        (current.detectedMediaState?.audioVariants?.size ?: 0) +
+                        (if (current.detectedMediaState?.directFileVariant != null || current.detectedMediaState?.directFileUrl != null) 1 else 0)
+                val newVariantsCount = (validMedia?.videoVariants?.size ?: 0) +
+                        (validMedia?.audioVariants?.size ?: 0) +
+                        (if (validMedia?.directFileVariant != null || validMedia?.directFileUrl != null) 1 else 0)
+
                 val shouldUpdateMedia = when {
-                    media == null -> false
+                    validMedia == null -> false
                     current.detectedMediaState == null -> true
-                    media.videoVariants.size >= oldVariantsCount -> true
+                    validMedia.directFileVariant != null -> true
+                    newVariantsCount >= oldVariantsCount -> true
                     else -> false
                 }
 
-                val finalMedia = if (shouldUpdateMedia) media else current.detectedMediaState
+                val finalMedia = if (shouldUpdateMedia) validMedia else current.detectedMediaState
                 val shouldShow = (autoShowBottomSheet || current.autoOpenBottomSheetOnMediaDetected) && finalMedia != null
+                android.util.Log.d("BrowserViewModel", "Updated detectedMediaState: finalMedia != null: ${finalMedia != null}, shouldShow: $shouldShow")
                 current.copy(
                     isExtractingMedia = false,
                     detectedMediaState = finalMedia,
@@ -542,6 +570,23 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
         }
+    }
+
+    fun cancelSniffing() {
+        mediaExtractionJob?.cancel()
+        mediaExtractionJob = null
+        _uiState.update { it.copy(isExtractingMedia = false) }
+    }
+
+    fun dismissDetectedMedia() {
+        cancelSniffing()
+        _uiState.update { it.copy(detectedMediaState = null, showMediaBottomSheet = false) }
+    }
+
+    fun manualSniffCurrentPage(url: String? = null, fallbackTitle: String? = null) {
+        val targetUrl = url ?: _uiState.value.currentLoadedUrl ?: return
+        android.util.Log.d("BrowserViewModel", "manualSniffCurrentPage: targetUrl: $targetUrl")
+        triggerMediaExtraction(targetUrl, fallbackTitle ?: _uiState.value.pageTitle, autoShowBottomSheet = true)
     }
 
     fun showBottomSheet() {

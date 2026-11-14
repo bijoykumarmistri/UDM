@@ -9,7 +9,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,14 +37,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val appSettings = remember { AppSettingsState(this@MainActivity) }
-            val isDark = appSettings.isDarkThemeEnabled ?: isSystemInDarkTheme()
             val sharedUrl by sharedUrlState
 
             CompositionLocalProvider(LocalAppSettings provides appSettings) {
-                UDMTheme(
-                    darkTheme = isDark,
-                    dynamicColor = appSettings.isDynamicColorEnabled,
-                ) {
+                UDMTheme {
                     UdmAppShell(
                         initialSharedUrl = sharedUrl,
                         onSharedUrlHandled = { sharedUrlState.value = null }

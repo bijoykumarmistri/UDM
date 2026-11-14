@@ -35,6 +35,7 @@ class DownloadManager private constructor(context: Context) {
         mediaType: MediaType = MediaType.DIRECT_FILE,
         qualityLabel: String = "1080p",
         codecLabel: String = "AV1",
+        formatId: String? = null,
         threadCount: Int = 8,
         totalBytes: Long = 0L
     ): String = withContext(Dispatchers.IO) {
@@ -51,6 +52,7 @@ class DownloadManager private constructor(context: Context) {
             mediaType = mediaType,
             qualityLabel = qualityLabel,
             codecLabel = codecLabel,
+            formatId = formatId,
             totalBytes = totalBytes,
             downloadedBytes = 0L,
             status = DownloadStatus.QUEUED,

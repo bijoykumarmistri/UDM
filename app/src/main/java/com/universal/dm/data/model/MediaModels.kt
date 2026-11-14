@@ -43,7 +43,11 @@ data class DetectedPageMedia(
     val videoVariants: List<StreamVariant>,
     val audioVariants: List<StreamVariant>,
     val directFileUrl: String? = null,
-)
+    val directFileVariant: StreamVariant? = null,
+) {
+    val isDirectFile: Boolean
+        get() = directFileVariant != null || (videoVariants.isEmpty() && audioVariants.isEmpty() && directFileUrl != null)
+}
 
 enum class DownloadStatus {
     QUEUED,

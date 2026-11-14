@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -60,10 +61,11 @@ fun SearchEngineSelectionDialog(
     onDismiss: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF09141D),
+        containerColor = if (isDark) Color(0xFF09141D) else MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = RoundedCornerShape(28.dp),
         title = {
             Row(
@@ -74,14 +76,14 @@ fun SearchEngineSelectionDialog(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF0D2833))
-                        .border(1.dp, Color(0xFF00A8C6), CircleShape),
+                        .background(if (isDark) Color(0xFF0D2833) else Color(0xFFE0F7FA))
+                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
-                        tint = Color(0xFF00E5FF),
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -90,12 +92,12 @@ fun SearchEngineSelectionDialog(
                         text = "Default Search Engine",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = "Select your preferred omnibar engine",
                         fontSize = 12.sp,
-                        color = Color(0xFF78909C)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -120,13 +122,17 @@ fun SearchEngineSelectionDialog(
                     )
 
                     val borderColor by animateColorAsState(
-                        targetValue = if (isSelected) Color(0xFF00A8C6) else Color(0xFF142B39),
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else if (isDark) Color(0xFF142B39) else MaterialTheme.colorScheme.outlineVariant,
                         animationSpec = spring(dampingRatio = 0.85f),
                         label = "CardBorder"
                     )
 
                     val backgroundColor by animateColorAsState(
-                        targetValue = if (isSelected) Color(0x66004D59) else Color(0xFF0C1924),
+                        targetValue = if (isSelected) {
+                            if (isDark) Color(0x66004D59) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                        } else {
+                            if (isDark) Color(0xFF0C1924) else MaterialTheme.colorScheme.surface
+                        },
                         animationSpec = spring(dampingRatio = 0.85f),
                         label = "CardBackground"
                     )
@@ -162,13 +168,21 @@ fun SearchEngineSelectionDialog(
                                     text = engine.displayName,
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) Color.White else Color(0xFFDEE3E4)
+                                    color = if (isSelected) {
+                                        if (isDark) Color.White else MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    }
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = engine.hint,
                                     fontSize = 12.sp,
-                                    color = if (isSelected) Color(0xFF80DEEA) else Color(0xFF78909C)
+                                    color = if (isSelected) {
+                                        if (isDark) Color(0xFF80DEEA) else MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
                                 )
                             }
 
@@ -180,11 +194,11 @@ fun SearchEngineSelectionDialog(
                                     .size(24.dp)
                                     .clip(CircleShape)
                                     .background(
-                                        if (isSelected) Color(0xFF00E5FF) else Color.Transparent
+                                        if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
                                     )
                                     .border(
                                         width = if (isSelected) 0.dp else 1.5.dp,
-                                        color = if (isSelected) Color.Transparent else Color(0xFF4A6267),
+                                        color = if (isSelected) Color.Transparent else if (isDark) Color(0xFF4A6267) else MaterialTheme.colorScheme.outline,
                                         shape = CircleShape
                                     ),
                                 contentAlignment = Alignment.Center
@@ -193,7 +207,7 @@ fun SearchEngineSelectionDialog(
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = "Selected",
-                                        tint = Color(0xFF001F24),
+                                        tint = MaterialTheme.colorScheme.onPrimary,
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
@@ -207,7 +221,7 @@ fun SearchEngineSelectionDialog(
             TextButton(
                 onClick = onDismiss,
                 colors = ButtonDefaults.textButtonColors(
-                    contentColor = Color(0xFF00E5FF)
+                    contentColor = MaterialTheme.colorScheme.primary
                 )
             ) {
                 Text(

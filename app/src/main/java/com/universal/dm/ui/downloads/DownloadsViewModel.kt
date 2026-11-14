@@ -22,6 +22,9 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
     private val downloadDao = database.downloadDao()
     private val downloadManager = DownloadManager.getInstance(application)
 
+    val allTasks: StateFlow<List<DownloadTaskEntity>> = downloadDao.getAllTasksFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val activeTasks: StateFlow<List<DownloadTaskEntity>> = downloadDao.getActiveTasksFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -31,20 +34,40 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
     private val _peakSpeed = MutableStateFlow(0L)
     val peakSpeed: StateFlow<Long> = _peakSpeed.asStateFlow()
 
+    private val _previewTask = MutableStateFlow<DownloadTaskEntity?>(null)
+    val previewTask: StateFlow<DownloadTaskEntity?> = _previewTask.asStateFlow()
+
     init {
         viewModelScope.launch {
-            activeTasks.collect { tasks ->
-                val currentTotalSpeed = tasks.sumOf { it.speedBytesPerSec }
+            allTasks.collect { tasks ->
+                val activeRunning = tasks.filter { it.status == DownloadStatus.DOWNLOADING }
+                val currentTotalSpeed = activeRunning.sumOf { it.speedBytesPerSec }
                 if (currentTotalSpeed > _peakSpeed.value) {
                     _peakSpeed.value = currentTotalSpeed
                 }
 
                 val newMap = mutableMapOf<String, List<DownloadChunkEntity>>()
-                tasks.forEach { task ->
+                tasks.filter { it.status == DownloadStatus.DOWNLOADING || it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.PAUSED }.forEach { task ->
                     newMap[task.id] = downloadDao.getChunksForTask(task.id)
                 }
                 _chunksMap.value = newMap
             }
+        }
+    }
+
+    fun selectTaskForPreview(task: DownloadTaskEntity?) {
+        _previewTask.value = task
+    }
+
+    fun deleteTask(task: DownloadTaskEntity, deleteFileFromStorage: Boolean = true) {
+        viewModelScope.launch {
+            if (deleteFileFromStorage && !task.filePath.startsWith("content://")) {
+                val file = java.io.File(task.filePath)
+                if (file.exists()) {
+                    runCatching { file.delete() }
+                }
+            }
+            downloadDao.deleteTask(task)
         }
     }
 

@@ -91,6 +91,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -153,6 +154,8 @@ fun SettingsScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+
             Column {
                 Text(
                     text = "Settings",
@@ -161,20 +164,20 @@ fun SettingsScreen(
                         fontWeight = FontWeight.ExtraBold,
                         letterSpacing = (-0.5).sp
                     ),
-                    color = Color.White
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = "Preferences & engine telemetry",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF8BA6B9)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
             // Version Pill
             Surface(
                 shape = RoundedCornerShape(10.dp),
-                color = Color(0xFF0F2636),
-                border = BorderStroke(1.dp, Color(0xFF1E435B))
+                color = if (isDark) Color(0xFF0F2636) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, if (isDark) Color(0xFF1E435B) else MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
@@ -464,6 +467,18 @@ fun SettingsScreen(
 
             HorizontalDivider(color = Color(0xFF112330))
 
+            // DNS & Tracker Sinkhole Filter
+            AppleSettingsSwitchRow(
+                icon = Icons.Default.Shield,
+                iconTint = Color(0xFF10B981),
+                title = "DNS & Tracker Sinkhole Filter",
+                subtitle = "Blocks known telemetry and ad network hosts via in-memory DNS filtering",
+                checked = settings.isDnsFilterEnabled,
+                onCheckedChange = { settings.updateDnsFilter(it) }
+            )
+
+            HorizontalDivider(color = Color(0xFF112330))
+
             // Block Pop-ups & Redirects
             AppleSettingsSwitchRow(
                 icon = Icons.Default.Security,
@@ -525,24 +540,10 @@ fun SettingsScreen(
             }
         }
 
-        // 6. SECTION: APPEARANCE & THEMING
-        SettingsSectionHeader(title = "Appearance & Motion", icon = Icons.Default.Palette, tint = Color(0xFFFFD54F))
+        // 6. SECTION: APPEARANCE & SYSTEM
+        SettingsSectionHeader(title = "Appearance & System", icon = Icons.Default.Palette, tint = Color(0xFF00E5FF))
 
         LuxurySettingsContainer {
-            // Force Dark Theme
-            AppleSettingsSwitchRow(
-                icon = Icons.Default.DarkMode,
-                iconTint = Color(0xFFCFBCFF),
-                title = "OLED Pure Obsidian Theme",
-                subtitle = "Ultra-dark high-contrast surfaces optimized for OLED battery efficiency",
-                checked = settings.isDarkThemeEnabled == true,
-                onCheckedChange = { isChecked ->
-                    settings.updateDarkTheme(if (isChecked) true else null)
-                }
-            )
-
-            HorizontalDivider(color = Color(0xFF112330))
-
             // Material You Dynamic Palette
             AppleSettingsSwitchRow(
                 icon = Icons.Default.ColorLens,
@@ -665,11 +666,15 @@ fun SettingsSectionHeader(title: String, icon: ImageVector, tint: Color) {
 fun LuxurySettingsContainer(
     content: @Composable () -> Unit
 ) {
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val containerColor = if (isDark) Color(0xFF08141F) else MaterialTheme.colorScheme.surfaceContainerLow
+    val borderColor = if (isDark) Color(0xFF132838) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
-        color = Color(0xFF08141F),
-        border = BorderStroke(1.dp, Color(0xFF132838))
+        color = containerColor,
+        border = BorderStroke(1.dp, borderColor)
     ) {
         Column(
             modifier = Modifier
@@ -694,6 +699,8 @@ fun AppleSettingsSwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -717,11 +724,11 @@ fun AppleSettingsSwitchRow(
             Column(modifier = Modifier.padding(end = 8.dp)) {
                 Text(
                     text = title,
-                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 )
                 Text(
                     text = subtitle,
-                    style = TextStyle(fontSize = 11.sp, color = Color(0xFF7F9DB0))
+                    style = TextStyle(fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 )
             }
         }
@@ -730,10 +737,10 @@ fun AppleSettingsSwitchRow(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color(0xFF00E5FF),
-                checkedTrackColor = Color(0xFF004D5A),
-                uncheckedThumbColor = Color(0xFF637C8E),
-                uncheckedTrackColor = Color(0xFF132533)
+                checkedThumbColor = if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary,
+                checkedTrackColor = if (isDark) Color(0xFF004D5A) else MaterialTheme.colorScheme.primaryContainer,
+                uncheckedThumbColor = if (isDark) Color(0xFF637C8E) else MaterialTheme.colorScheme.outline,
+                uncheckedTrackColor = if (isDark) Color(0xFF132533) else MaterialTheme.colorScheme.surfaceContainerHighest
             )
         )
     }
@@ -748,16 +755,23 @@ fun StreamEngineTelemetryCard(
     updateMessage: String?,
     onUpdateEngine: () -> Unit
 ) {
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val cardColor = if (isDark) Color(0xFF08141F) else MaterialTheme.colorScheme.surfaceContainerLow
+    val borderBrush = if (isDark) {
+        Brush.horizontalGradient(
+            listOf(Color(0x4000E5FF), Color(0x2000B0FF), Color(0x1000E5FF))
+        )
+    } else {
+        Brush.horizontalGradient(
+            listOf(MaterialTheme.colorScheme.primary.copy(0.35f), MaterialTheme.colorScheme.secondary.copy(0.2f))
+        )
+    }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        color = Color(0xFF08141F),
-        border = BorderStroke(
-            1.dp,
-            Brush.horizontalGradient(
-                listOf(Color(0x4000E5FF), Color(0x2000B0FF), Color(0x1000E5FF))
-            )
-        )
+        color = cardColor,
+        border = BorderStroke(1.dp, borderBrush)
     ) {
         Column(
             modifier = Modifier

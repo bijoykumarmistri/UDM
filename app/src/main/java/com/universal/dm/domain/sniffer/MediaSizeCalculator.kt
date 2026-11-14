@@ -48,6 +48,7 @@ object MediaSizeCalculator {
      * @param explicitVideoBytes Known video stream size if provided by server/yt-dlp
      * @param explicitAudioBytes Known audio stream size if provided by server/yt-dlp
      * @param variantBitrateKbps Bitrate from stream format if provided
+     * @param requiresAudioMerge Whether video stream lacks audio and requires merging separate audio
      */
     fun calculateVideoTotalBytes(
         height: Int,
@@ -55,12 +56,15 @@ object MediaSizeCalculator {
         durationSeconds: Long?,
         explicitVideoBytes: Long? = null,
         explicitAudioBytes: Long? = null,
-        variantBitrateKbps: Int? = null
+        variantBitrateKbps: Int? = null,
+        requiresAudioMerge: Boolean = false
     ): Long {
         val duration = if (durationSeconds != null && durationSeconds > 0) durationSeconds else NOMINAL_DURATION_SECONDS
 
-        // 1. Calculate Paired Audio Stream Bytes (~128 kbps AAC)
-        val audioBytes = if (explicitAudioBytes != null && explicitAudioBytes > 0) {
+        // 1. Calculate Paired Audio Stream Bytes (~128 kbps AAC) ONLY if audio merge is required
+        val audioBytes = if (!requiresAudioMerge) {
+            0L
+        } else if (explicitAudioBytes != null && explicitAudioBytes > 0) {
             explicitAudioBytes
         } else {
             (PAIRED_AUDIO_BITRATE_KBPS * 1000L * duration) / 8L

@@ -50,78 +50,168 @@ class UdmDownloadWorker(
         val tempFile = File(tempDir, task.fileName)
 
         try {
-            val isDirectDownload = task.mediaType == MediaType.DIRECT_FILE ||
-                    task.downloadUrl.endsWith(".zip", ignoreCase = true) ||
-                    task.downloadUrl.endsWith(".apk", ignoreCase = true) ||
-                    task.downloadUrl.endsWith(".pdf", ignoreCase = true) ||
-                    task.downloadUrl.endsWith(".iso", ignoreCase = true) ||
-                    task.downloadUrl.endsWith(".tar", ignoreCase = true) ||
-                    task.downloadUrl.endsWith(".gz", ignoreCase = true)
+            val isYouTube = task.sourcePageUrl.contains("youtube.com", ignoreCase = true) ||
+                    task.sourcePageUrl.contains("youtu.be", ignoreCase = true) ||
+                    task.downloadUrl.contains("youtube.com", ignoreCase = true) ||
+                    task.downloadUrl.contains("youtu.be", ignoreCase = true)
+
+            val isHlsOrDash = task.downloadUrl.contains(".m3u8", ignoreCase = true) ||
+                    task.downloadUrl.contains(".mpd", ignoreCase = true)
+
+            val hasSeparateAudio = !task.pairedAudioUrl.isNullOrBlank()
+
+            // Direct download candidates:
+            // 1. Explicit DIRECT_FILE or formatId == "direct"
+            // 2. Direct media file on a non-YouTube site where video and audio are not separated and it's not an HLS playlist
+            val isDirectDownload = !isYouTube && !isHlsOrDash && (
+                task.mediaType == MediaType.DIRECT_FILE ||
+                task.formatId == "direct" ||
+                !hasSeparateAudio
+            )
+
+            val streamTargetUrl = if (isYouTube) {
+                task.sourcePageUrl.ifEmpty { task.downloadUrl }
+            } else {
+                task.downloadUrl.ifEmpty { task.sourcePageUrl }
+            }
+
+            val refererUrl = task.sourcePageUrl.takeIf { it.isNotBlank() }
 
             val completedFile: File = if (isDirectDownload) {
-                // ENGINE A: Direct HTTP Multi-Threaded Chunk Downloader (OkHttp)
-                httpChunkDownloader.downloadDirectHttp(
-                    taskId = taskId,
-                    url = task.downloadUrl,
-                    targetFile = tempFile,
-                    requestedThreadCount = task.threadCount
-                ) { downloaded, total, speed ->
-                    val percent = if (total > 0) ((downloaded * 100) / total).toInt().coerceIn(0, 100) else 0
-                    runCatching {
-                        setForeground(
-                            DownloadEngineHelper.createForegroundInfo(
-                                context = applicationContext,
-                                notificationId = notificationId,
-                                title = task.title,
-                                progressPercent = percent,
-                                speedBytesPerSec = speed
+                try {
+                    // ENGINE A: Direct HTTP Multi-Threaded Chunk Downloader (OkHttp)
+                    httpChunkDownloader.downloadDirectHttp(
+                        taskId = taskId,
+                        url = task.downloadUrl,
+                        targetFile = tempFile,
+                        requestedThreadCount = task.threadCount,
+                        referer = refererUrl
+                    ) { downloaded, total, speed ->
+                        val percent = if (total > 0) ((downloaded * 100) / total).toInt().coerceIn(0, 100) else 0
+                        runCatching {
+                            setForeground(
+                                DownloadEngineHelper.createForegroundInfo(
+                                    context = applicationContext,
+                                    notificationId = notificationId,
+                                    title = task.title,
+                                    progressPercent = percent,
+                                    speedBytesPerSec = speed
+                                )
                             )
-                        )
+                        }
+                    }
+                } catch (directEx: Exception) {
+                    if (isStopped) throw directEx
+                    Log.w(TAG, "Direct download failed, attempting stream extractor fallback", directEx)
+                    streamExtractorDownloader.downloadStream(
+                        taskId = taskId,
+                        url = streamTargetUrl,
+                        outputDirectory = tempDir,
+                        mediaType = task.mediaType,
+                        qualityLabel = task.qualityLabel,
+                        codecLabel = task.codecLabel,
+                        formatId = task.formatId,
+                        threadCount = task.threadCount,
+                        referer = refererUrl
+                    ) { percent, speed, isMuxing ->
+                        runCatching {
+                            setForeground(
+                                DownloadEngineHelper.createForegroundInfo(
+                                    context = applicationContext,
+                                    notificationId = notificationId,
+                                    title = task.title,
+                                    progressPercent = percent,
+                                    speedBytesPerSec = speed,
+                                    isMuxing = isMuxing
+                                )
+                            )
+                        }
                     }
                 }
             } else {
-                // ENGINE B: YoutubeDL + FFmpeg Stream Extraction & Merging
-                streamExtractorDownloader.downloadStream(
-                    taskId = taskId,
-                    url = task.sourcePageUrl.ifEmpty { task.downloadUrl },
-                    outputDirectory = tempDir,
-                    mediaType = task.mediaType,
-                    qualityLabel = task.qualityLabel,
-                    codecLabel = task.codecLabel,
-                    threadCount = task.threadCount
-                ) { percent, speed, isMuxing ->
-                    runCatching {
-                        setForeground(
-                            DownloadEngineHelper.createForegroundInfo(
-                                context = applicationContext,
-                                notificationId = notificationId,
-                                title = task.title,
-                                progressPercent = percent,
-                                speedBytesPerSec = speed,
-                                isMuxing = isMuxing
+                try {
+                    // ENGINE B: YoutubeDL + FFmpeg Stream Extraction & Merging
+                    streamExtractorDownloader.downloadStream(
+                        taskId = taskId,
+                        url = streamTargetUrl,
+                        outputDirectory = tempDir,
+                        mediaType = task.mediaType,
+                        qualityLabel = task.qualityLabel,
+                        codecLabel = task.codecLabel,
+                        formatId = task.formatId,
+                        threadCount = task.threadCount,
+                        referer = refererUrl
+                    ) { percent, speed, isMuxing ->
+                        runCatching {
+                            setForeground(
+                                DownloadEngineHelper.createForegroundInfo(
+                                    context = applicationContext,
+                                    notificationId = notificationId,
+                                    title = task.title,
+                                    progressPercent = percent,
+                                    speedBytesPerSec = speed,
+                                    isMuxing = isMuxing
+                                )
                             )
-                        )
+                        }
+                    }
+                } catch (streamEx: Exception) {
+                    if (isStopped) throw streamEx
+                    if (!isYouTube && task.downloadUrl.startsWith("http", ignoreCase = true) && !isHlsOrDash) {
+                        Log.w(TAG, "Stream extractor failed, falling back to direct HTTP chunk download", streamEx)
+                        httpChunkDownloader.downloadDirectHttp(
+                            taskId = taskId,
+                            url = task.downloadUrl,
+                            targetFile = tempFile,
+                            requestedThreadCount = task.threadCount,
+                            referer = refererUrl
+                        ) { downloaded, total, speed ->
+                            val percent = if (total > 0) ((downloaded * 100) / total).toInt().coerceIn(0, 100) else 0
+                            runCatching {
+                                setForeground(
+                                    DownloadEngineHelper.createForegroundInfo(
+                                        context = applicationContext,
+                                        notificationId = notificationId,
+                                        title = task.title,
+                                        progressPercent = percent,
+                                        speedBytesPerSec = speed
+                                    )
+                                )
+                            }
+                        }
+                    } else {
+                        throw streamEx
                     }
                 }
             }
 
             // Determine exact MIME type & extension from the actual finished file
             val fileExt = (completedFile.extension.ifEmpty { task.fileName.substringAfterLast('.', "") }).lowercase()
+            val resolvedMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(fileExt)
             val mimeType = when (task.mediaType) {
                 MediaType.VIDEO -> when (fileExt) {
                     "mkv" -> "video/x-matroska"
                     "webm" -> "video/webm"
                     "avi" -> "video/x-msvideo"
-                    else -> "video/mp4"
+                    else -> resolvedMime ?: "video/mp4"
                 }
                 MediaType.AUDIO -> when (fileExt) {
                     "mp3" -> "audio/mpeg"
                     "opus", "ogg" -> "audio/ogg"
                     "flac" -> "audio/flac"
                     "wav" -> "audio/wav"
-                    else -> "audio/mp4"
+                    else -> resolvedMime ?: "audio/mp4"
                 }
-                MediaType.DIRECT_FILE -> "application/octet-stream"
+                MediaType.DIRECT_FILE -> when (fileExt) {
+                    "apk" -> "application/vnd.android.package-archive"
+                    "pdf" -> "application/pdf"
+                    "zip" -> "application/zip"
+                    "tar" -> "application/x-tar"
+                    "gz" -> "application/gzip"
+                    "7z" -> "application/x-7z-compressed"
+                    "rar" -> "application/vnd.rar"
+                    else -> resolvedMime ?: "application/octet-stream"
+                }
             }
 
             // Ensure task.fileName has the correct extension matching the actual completed file

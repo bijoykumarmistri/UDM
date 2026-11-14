@@ -233,6 +233,7 @@ fun TabSwitcherSheet(
                         val isActive = tab.id == activeTabId
                         Card(
                             modifier = Modifier
+                                .animateItem()
                                 .fillMaxWidth()
                                 .aspectRatio(1.25f)
                                 .clickable {

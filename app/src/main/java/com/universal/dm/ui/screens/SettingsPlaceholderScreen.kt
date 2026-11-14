@@ -272,47 +272,6 @@ fun SettingsPlaceholderScreen(
                         enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                     )
                 }
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest)
-
-                // Dark Theme toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DarkMode,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Column {
-                            Text(
-                                text = "Force Dark Theme",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "Toggle OLED Deep Dark / Ocean Teal mode",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Switch(
-                        checked = settings.isDarkThemeEnabled == true,
-                        onCheckedChange = { isChecked ->
-                            settings.isDarkThemeEnabled = if (isChecked) true else false
-                        }
-                    )
-                }
             }
         }
 

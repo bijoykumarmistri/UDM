@@ -19,6 +19,7 @@ data class DownloadTaskEntity(
     val mediaType: MediaType = MediaType.DIRECT_FILE,
     val qualityLabel: String,
     val codecLabel: String,
+    val formatId: String? = null,
     val totalBytes: Long = 0L,
     val downloadedBytes: Long = 0L,
     val status: DownloadStatus = DownloadStatus.QUEUED,

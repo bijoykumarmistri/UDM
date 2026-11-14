@@ -4,6 +4,8 @@ import androidx.activity.BackEventCompat
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -19,8 +21,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -60,7 +62,6 @@ import com.universal.dm.UdmApplication
 import com.universal.dm.data.local.DownloadTaskEntity
 import com.universal.dm.ui.browser.BrowserScreen
 import com.universal.dm.ui.downloads.DownloadsScreen
-import com.universal.dm.ui.finished.FinishedScreen
 import com.universal.dm.ui.settings.LocalAppSettings
 import com.universal.dm.ui.settings.SettingsScreen
 import kotlinx.coroutines.flow.Flow
@@ -158,54 +159,7 @@ fun UdmAppShell(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = when (currentScreen) {
-                                Screen.Browser -> "Browser & Sniffer"
-                                Screen.Downloads -> "Active Downloads"
-                                Screen.Finished -> "Downloaded Library"
-                                Screen.Settings -> "UDM Preferences"
-                            },
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (currentScreen == Screen.Downloads && liveActiveCount > 0) {
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF00E5FF))
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "$liveActiveCount ACTIVE",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = Color(0xFF001F24)
-                                )
-                            }
-                        }
-                    }
-                },
-                navigationIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Bolt,
-                        contentDescription = "UDM Engine",
-                        tint = Color(0xFF00E5FF),
-                        modifier = Modifier
-                            .padding(start = 16.dp)
-                            .size(24.dp)
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
-                )
-            )
-        },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             // Floating Capsule Pill Dock matching reference design
             UdmBottomNav(
@@ -223,72 +177,44 @@ fun UdmAppShell(
                 .padding(innerPadding)
                 .graphicsLayer {
                     val progress = backProgress
-                    val shiftPx = if (progress > 0f) {
-                        val px = progress * 28.dp.toPx()
-                        if (backSwipeEdge == BackEventCompat.EDGE_LEFT) px else -px
-                    } else 0f
-                    translationX = shiftPx
-                    scaleX = predictiveScale
-                    scaleY = predictiveScale
                     if (progress > 0f) {
+                        val px = progress * 28.dp.toPx()
+                        translationX = if (backSwipeEdge == BackEventCompat.EDGE_LEFT) px else -px
+                        scaleX = predictiveScale
+                        scaleY = predictiveScale
                         shape = RoundedCornerShape(progress * 28.dp.toPx())
                         clip = true
+                    } else {
+                        translationX = 0f
+                        scaleX = 1f
+                        scaleY = 1f
+                        clip = false
                     }
                 }
         ) {
-            // Apple-style silky smooth fluid page transitions
+            // Bespoke Apple / Material 3 Fluid Spatial Transition
+            // Subtle 5% glide + 0.985f scale settle + crossfade for buttery 120Hz responsiveness
             AnimatedContent(
                 targetState = currentScreen,
                 transitionSpec = {
                     val isForward = targetState.ordinal > initialState.ordinal
-                    val slideOffsetFraction = 0.08f // 8% subtle Apple slide
-                    val appleEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
-                    val smoothSpring = spring<Float>(
-                        dampingRatio = 0.88f,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                    val smoothIntOffsetSpring = spring<androidx.compose.ui.unit.IntOffset>(
-                        dampingRatio = 0.88f,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
+                    val slideOffsetPercent = 0.05f
+                    val enterEasing = CubicBezierEasing(0.15f, 1f, 0.3f, 1f)
 
-                    if (isForward) {
-                        (slideInHorizontally(
-                            animationSpec = smoothIntOffsetSpring,
-                            initialOffsetX = { (it * slideOffsetFraction).toInt() }
-                        ) + fadeIn(
-                            animationSpec = tween(durationMillis = 240, easing = appleEasing)
-                        ) + scaleIn(
-                            initialScale = 0.97f,
-                            animationSpec = smoothSpring
-                        )) togetherWith (slideOutHorizontally(
-                            animationSpec = smoothIntOffsetSpring,
-                            targetOffsetX = { (-it * slideOffsetFraction).toInt() }
-                        ) + fadeOut(
-                            animationSpec = tween(durationMillis = 200, easing = appleEasing)
-                        ) + scaleOut(
-                            targetScale = 0.97f,
-                            animationSpec = smoothSpring
-                        ))
-                    } else {
-                        (slideInHorizontally(
-                            animationSpec = smoothIntOffsetSpring,
-                            initialOffsetX = { (-it * slideOffsetFraction).toInt() }
-                        ) + fadeIn(
-                            animationSpec = tween(durationMillis = 240, easing = appleEasing)
-                        ) + scaleIn(
-                            initialScale = 0.97f,
-                            animationSpec = smoothSpring
-                        )) togetherWith (slideOutHorizontally(
-                            animationSpec = smoothIntOffsetSpring,
-                            targetOffsetX = { (it * slideOffsetFraction).toInt() }
-                        ) + fadeOut(
-                            animationSpec = tween(durationMillis = 200, easing = appleEasing)
-                        ) + scaleOut(
-                            targetScale = 0.97f,
-                            animationSpec = smoothSpring
-                        ))
-                    }
+                    (fadeIn(
+                        animationSpec = tween(durationMillis = 240, easing = LinearOutSlowInEasing)
+                    ) + scaleIn(
+                        initialScale = 0.985f,
+                        animationSpec = tween(durationMillis = 240, easing = enterEasing)
+                    ) + slideInHorizontally(
+                        initialOffsetX = { (it * (if (isForward) slideOffsetPercent else -slideOffsetPercent)).toInt() },
+                        animationSpec = tween(durationMillis = 240, easing = enterEasing)
+                    )) togetherWith (fadeOut(
+                        animationSpec = tween(durationMillis = 140, easing = FastOutLinearInEasing)
+                    ) + slideOutHorizontally(
+                        targetOffsetX = { (it * (if (isForward) -slideOffsetPercent else slideOffsetPercent)).toInt() },
+                        animationSpec = tween(durationMillis = 160, easing = FastOutLinearInEasing)
+                    ))
                 },
                 label = "ScreenTransition"
             ) { screen ->
@@ -310,8 +236,9 @@ fun UdmAppShell(
                                 navigateTo(Screen.Downloads)
                             }
                         )
-                        Screen.Downloads -> DownloadsScreen()
-                        Screen.Finished -> FinishedScreen()
+                        Screen.Downloads -> DownloadsScreen(
+                            onNavigateToBrowser = { navigateTo(Screen.Browser) }
+                        )
                         Screen.Settings -> SettingsScreen()
                     }
                 }

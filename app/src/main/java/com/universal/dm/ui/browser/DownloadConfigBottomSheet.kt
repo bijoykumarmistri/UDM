@@ -35,7 +35,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
@@ -47,8 +49,10 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.RadioButtonChecked
@@ -90,6 +94,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -151,16 +156,20 @@ fun DownloadConfigBottomSheet(
         threadCount: Int,
         destinationFolder: String,
         totalBytes: Long,
-        sourcePageUrl: String
+        sourcePageUrl: String,
+        formatId: String?
     ) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val containerColor = if (isDark) Color(0xFF07121B) else MaterialTheme.colorScheme.surfaceContainerLow
+    val handleColor = if (isDark) Color(0xFF223A4D) else MaterialTheme.colorScheme.outlineVariant
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = Color(0xFF07121B),
+        containerColor = containerColor,
         dragHandle = {
             Box(
                 modifier = Modifier
@@ -168,7 +177,7 @@ fun DownloadConfigBottomSheet(
                     .width(42.dp)
                     .height(4.5.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF223A4D))
+                    .background(handleColor)
             )
         }
     ) {
@@ -195,7 +204,8 @@ fun DownloadConfigContent(
         threadCount: Int,
         destinationFolder: String,
         totalBytes: Long,
-        sourcePageUrl: String
+        sourcePageUrl: String,
+        formatId: String?
     ) -> Unit
 ) {
     val context = LocalContext.current
@@ -204,22 +214,42 @@ fun DownloadConfigContent(
     val appSettings = LocalAppSettings.current
     val scrollState = rememberScrollState()
 
-    // 1. Initial Media Type State
-    var selectedMediaType by remember {
+    // 1. Initial Media Type State & Direct File Recognition
+    val isDirectFile = detectedMedia.isDirectFile ||
+            (detectedMedia.videoVariants.isEmpty() && detectedMedia.audioVariants.isEmpty())
+
+    val detectedExtension = remember(detectedMedia) {
+        val fromVariant = detectedMedia.directFileVariant?.containerExt?.takeIf { it.isNotBlank() }
+        val fromUrl = detectedMedia.directFileUrl?.let { Uri.parse(it).path?.substringAfterLast('.', "") }?.takeIf { it.isNotBlank() }
+        val fromTitle = detectedMedia.pageTitle.substringAfterLast('.', "").takeIf { it.isNotBlank() && it.length <= 5 }
+        (fromVariant ?: fromUrl ?: fromTitle ?: "bin").lowercase(Locale.ROOT)
+    }
+
+    var selectedMediaType by remember(detectedMedia.pageUrl) {
         mutableStateOf(
-            if (detectedMedia.videoVariants.isNotEmpty()) MediaType.VIDEO else MediaType.AUDIO
+            when {
+                isDirectFile -> MediaType.DIRECT_FILE
+                detectedMedia.videoVariants.isNotEmpty() -> MediaType.VIDEO
+                else -> MediaType.AUDIO
+            }
         )
     }
 
     // Editable Filename
-    val initialSanitizedName = remember(detectedMedia.pageTitle) {
-        detectedMedia.pageTitle
+    val initialSanitizedName = remember(detectedMedia.pageTitle, detectedExtension) {
+        val raw = detectedMedia.pageTitle.trim()
+        val stripped = if (detectedExtension.isNotBlank() && raw.endsWith(".$detectedExtension", ignoreCase = true)) {
+            raw.substringBeforeLast('.')
+        } else {
+            raw
+        }
+        stripped
             .replace(Regex("[^a-zA-Z0-9._\\- ]"), "_")
             .trim()
             .take(65)
-            .ifEmpty { "download_media" }
+            .ifEmpty { if (isDirectFile) "download_file" else "download_media" }
     }
-    var editableFileName by remember { mutableStateOf(initialSanitizedName) }
+    var editableFileName by remember(detectedMedia.pageUrl) { mutableStateOf(initialSanitizedName) }
 
     // Advanced Options State
     var isAdvancedExpanded by remember { mutableStateOf(false) }
@@ -256,23 +286,21 @@ fun DownloadConfigContent(
 
         standardHeights.forEach { (height, label, badgePair) ->
             val match = availableVariantsByHeight[height]?.firstOrNull()
-            val hasNearbyVariant = detectedMedia.videoVariants.any { it.resolutionHeight in (height - 60)..(height + 60) }
-            val isSupportedTier = height <= maxAvailableHeight
+            val hasNearbyVariant = detectedMedia.videoVariants.find { it.resolutionHeight in (height - 60)..(height + 60) }
 
-            if (match != null || hasNearbyVariant || (isSupportedTier && detectedMedia.videoVariants.isNotEmpty())) {
-                val variant = match
-                    ?: detectedMedia.videoVariants.find { it.resolutionHeight in (height - 60)..(height + 60) }
-                    ?: detectedMedia.videoVariants.minByOrNull { kotlin.math.abs(it.resolutionHeight - height) }
+            if (match != null || hasNearbyVariant != null) {
+                val variant = match ?: hasNearbyVariant
 
-                val computedBytes = if ((variant?.fileSizeBytes ?: 0L) > 0 && variant?.resolutionHeight == height) {
-                    variant.fileSizeBytes
+                val isExactOrNearby = variant != null && kotlin.math.abs(variant.resolutionHeight - height) <= 60
+                val computedBytes = if (isExactOrNearby && (variant?.fileSizeBytes ?: 0L) > 0) {
+                    variant!!.fileSizeBytes
                 } else {
                     MediaSizeCalculator.calculateVideoTotalBytes(
                         height = height,
                         codec = variant?.videoCodec ?: VideoCodec.H264,
                         durationSeconds = duration,
-                        explicitVideoBytes = variant?.fileSizeBytes?.takeIf { it > 0 },
-                        variantBitrateKbps = variant?.bitrateKbps?.takeIf { it > 0 }
+                        variantBitrateKbps = variant?.bitrateKbps?.takeIf { it > 0 },
+                        requiresAudioMerge = variant?.requiresAudioMerge ?: false
                     )
                 }
 
@@ -292,7 +320,7 @@ fun DownloadConfigContent(
 
         // Add remaining unique variants from source streams
         detectedMedia.videoVariants.forEach { v ->
-            if (v.resolutionHeight > 0 && result.none { it.height == v.resolutionHeight }) {
+            if (v.resolutionHeight > 0 && result.none { kotlin.math.abs(it.height - v.resolutionHeight) <= 60 }) {
                 val computedBytes = if (v.fileSizeBytes > 0) {
                     v.fileSizeBytes
                 } else {
@@ -300,7 +328,8 @@ fun DownloadConfigContent(
                         height = v.resolutionHeight,
                         codec = v.videoCodec ?: VideoCodec.H264,
                         durationSeconds = duration,
-                        variantBitrateKbps = v.bitrateKbps.takeIf { it > 0 }
+                        variantBitrateKbps = v.bitrateKbps.takeIf { it > 0 },
+                        requiresAudioMerge = v.requiresAudioMerge
                     )
                 }
                 result.add(
@@ -317,12 +346,13 @@ fun DownloadConfigContent(
             }
         }
 
-        if (result.isEmpty()) {
+        if (result.isEmpty() && detectedMedia.directFileUrl != null && !isDirectFile) {
             standardHeights.filter { it.first <= 1080 }.forEach { (height, label, badgePair) ->
                 val fallbackBytes = MediaSizeCalculator.calculateVideoTotalBytes(
                     height = height,
                     codec = VideoCodec.H264,
-                    durationSeconds = duration
+                    durationSeconds = duration,
+                    requiresAudioMerge = false
                 )
                 result.add(
                     QualitySelectionItem(
@@ -340,55 +370,59 @@ fun DownloadConfigContent(
         result.sortedByDescending { it.height }
     }
 
-    val audioQualityOptions = remember(detectedMedia.audioVariants, detectedMedia.durationSeconds) {
-        val duration = detectedMedia.durationSeconds
-        val maxKbpsVariant = detectedMedia.audioVariants.maxByOrNull { it.bitrateKbps }
-        val midKbpsVariant = detectedMedia.audioVariants.find { it.bitrateKbps in 120..192 } ?: detectedMedia.audioVariants.firstOrNull()
-        val minKbpsVariant = detectedMedia.audioVariants.minByOrNull { it.bitrateKbps }
+    val audioQualityOptions = remember(detectedMedia.audioVariants, detectedMedia.durationSeconds, detectedMedia.directFileUrl, isDirectFile) {
+        if (isDirectFile || (detectedMedia.audioVariants.isEmpty() && detectedMedia.directFileUrl == null)) {
+            emptyList<QualitySelectionItem>()
+        } else {
+            val duration = detectedMedia.durationSeconds
+            val maxKbpsVariant = detectedMedia.audioVariants.maxByOrNull { it.bitrateKbps }
+            val midKbpsVariant = detectedMedia.audioVariants.find { it.bitrateKbps in 120..192 } ?: detectedMedia.audioVariants.firstOrNull()
+            val minKbpsVariant = detectedMedia.audioVariants.minByOrNull { it.bitrateKbps }
 
-        val masterBytes = MediaSizeCalculator.calculateAudioTotalBytes(320, AudioCodec.M4A, duration)
-        val studioBytes = MediaSizeCalculator.calculateAudioTotalBytes(256, AudioCodec.M4A, duration)
-        val stdBytes = MediaSizeCalculator.calculateAudioTotalBytes(128, AudioCodec.M4A, duration)
-        val saverBytes = MediaSizeCalculator.calculateAudioTotalBytes(64, AudioCodec.M4A, duration)
+            val masterBytes = MediaSizeCalculator.calculateAudioTotalBytes(320, AudioCodec.M4A, duration)
+            val studioBytes = MediaSizeCalculator.calculateAudioTotalBytes(256, AudioCodec.M4A, duration)
+            val stdBytes = MediaSizeCalculator.calculateAudioTotalBytes(128, AudioCodec.M4A, duration)
+            val saverBytes = MediaSizeCalculator.calculateAudioTotalBytes(64, AudioCodec.M4A, duration)
 
-        listOf(
-            QualitySelectionItem(
-                label = "320 kbps Master",
-                subLabel = "${MediaSizeCalculator.formatFileSize(masterBytes)} (Audiophile)",
-                badge = "Ultra Hi-Fi",
-                badgeColor = Color(0xFFFFD700),
-                height = 0,
-                bitrateKbps = 320,
-                matchedVariant = maxKbpsVariant?.copy(fileSizeBytes = masterBytes, bitrateKbps = 320) ?: maxKbpsVariant
-            ),
-            QualitySelectionItem(
-                label = "256 kbps Studio",
-                subLabel = "${MediaSizeCalculator.formatFileSize(studioBytes)} (High Fidelity)",
-                badge = "Studio Grade",
-                badgeColor = Color(0xFFB388FF),
-                height = 0,
-                bitrateKbps = 256,
-                matchedVariant = maxKbpsVariant?.copy(fileSizeBytes = studioBytes, bitrateKbps = 256) ?: maxKbpsVariant
-            ),
-            QualitySelectionItem(
-                label = "128 kbps Standard",
-                subLabel = "${MediaSizeCalculator.formatFileSize(stdBytes)} (Balanced)",
-                badge = "Crisp AAC",
-                badgeColor = Color(0xFF00E5FF),
-                height = 0,
-                bitrateKbps = 128,
-                matchedVariant = midKbpsVariant?.copy(fileSizeBytes = stdBytes, bitrateKbps = 128) ?: midKbpsVariant
-            ),
-            QualitySelectionItem(
-                label = "64 kbps Saver",
-                subLabel = "${MediaSizeCalculator.formatFileSize(saverBytes)} (Compact)",
-                badge = "Data Saver",
-                badgeColor = Color(0xFF4DD0E1),
-                height = 0,
-                bitrateKbps = 64,
-                matchedVariant = minKbpsVariant?.copy(fileSizeBytes = saverBytes, bitrateKbps = 64) ?: minKbpsVariant
+            listOf(
+                QualitySelectionItem(
+                    label = "320 kbps Master",
+                    subLabel = "${MediaSizeCalculator.formatFileSize(masterBytes)} (Audiophile)",
+                    badge = "Ultra Hi-Fi",
+                    badgeColor = Color(0xFFFFD700),
+                    height = 0,
+                    bitrateKbps = 320,
+                    matchedVariant = maxKbpsVariant?.copy(fileSizeBytes = masterBytes, bitrateKbps = 320) ?: maxKbpsVariant
+                ),
+                QualitySelectionItem(
+                    label = "256 kbps Studio",
+                    subLabel = "${MediaSizeCalculator.formatFileSize(studioBytes)} (High Fidelity)",
+                    badge = "Studio Grade",
+                    badgeColor = Color(0xFFB388FF),
+                    height = 0,
+                    bitrateKbps = 256,
+                    matchedVariant = maxKbpsVariant?.copy(fileSizeBytes = studioBytes, bitrateKbps = 256) ?: maxKbpsVariant
+                ),
+                QualitySelectionItem(
+                    label = "128 kbps Standard",
+                    subLabel = "${MediaSizeCalculator.formatFileSize(stdBytes)} (Balanced)",
+                    badge = "Crisp AAC",
+                    badgeColor = Color(0xFF00E5FF),
+                    height = 0,
+                    bitrateKbps = 128,
+                    matchedVariant = midKbpsVariant?.copy(fileSizeBytes = stdBytes, bitrateKbps = 128) ?: midKbpsVariant
+                ),
+                QualitySelectionItem(
+                    label = "64 kbps Saver",
+                    subLabel = "${MediaSizeCalculator.formatFileSize(saverBytes)} (Compact)",
+                    badge = "Data Saver",
+                    badgeColor = Color(0xFF4DD0E1),
+                    height = 0,
+                    bitrateKbps = 64,
+                    matchedVariant = minKbpsVariant?.copy(fileSizeBytes = saverBytes, bitrateKbps = 64) ?: minKbpsVariant
+                )
             )
-        )
+        }
     }
 
     // Selected Quality (Stage 2)
@@ -550,38 +584,52 @@ fun DownloadConfigContent(
         ?: activeCodecOptions.firstOrNull()
 
     // Sizing and Duration calculations for CTA & Gauge
-    val finalCodecName = selectedCodec?.codecName ?: if (selectedMediaType == MediaType.VIDEO) "AV1" else "M4A"
-    val finalQualityLabel = if (selectedMediaType == MediaType.VIDEO) {
-        selectedQuality?.label ?: "1080p FHD"
-    } else {
-        "${selectedQuality?.bitrateKbps ?: 256} kbps"
+    val finalCodecName = when (selectedMediaType) {
+        MediaType.DIRECT_FILE -> detectedExtension.uppercase(Locale.ROOT)
+        MediaType.VIDEO -> selectedCodec?.codecName ?: "AV1"
+        MediaType.AUDIO -> selectedCodec?.codecName ?: "M4A"
     }
-    val finalExtension = selectedCodec?.extension ?: if (selectedMediaType == MediaType.VIDEO) "mp4" else "m4a"
 
-    val finalTotalBytes = if (selectedMediaType == MediaType.VIDEO) {
-        selectedCodec?.matchedVariant?.fileSizeBytes?.takeIf { it > 0 }
-            ?: selectedQuality?.matchedVariant?.fileSizeBytes?.takeIf { it > 0 }
-            ?: MediaSizeCalculator.calculateVideoTotalBytes(
-                height = selectedQuality?.height ?: 1080,
-                codec = when (finalCodecName) {
-                    "AV1" -> VideoCodec.AV1
-                    "VP9" -> VideoCodec.VP9
-                    else -> VideoCodec.H264
-                },
-                durationSeconds = detectedMedia.durationSeconds
-            )
-    } else {
-        selectedCodec?.matchedVariant?.fileSizeBytes?.takeIf { it > 0 }
-            ?: selectedQuality?.matchedVariant?.fileSizeBytes?.takeIf { it > 0 }
-            ?: MediaSizeCalculator.calculateAudioTotalBytes(
-                targetBitrateKbps = selectedQuality?.bitrateKbps ?: 256,
-                codec = when (finalCodecName) {
-                    "Opus" -> AudioCodec.OPUS
-                    "MP3" -> AudioCodec.MP3
-                    else -> AudioCodec.M4A
-                },
-                durationSeconds = detectedMedia.durationSeconds
-            )
+    val finalQualityLabel = when (selectedMediaType) {
+        MediaType.DIRECT_FILE -> detectedMedia.directFileVariant?.qualityLabel ?: "${detectedExtension.uppercase(Locale.ROOT)} File"
+        MediaType.VIDEO -> selectedQuality?.label ?: "1080p FHD"
+        MediaType.AUDIO -> "${selectedQuality?.bitrateKbps ?: 256} kbps"
+    }
+
+    val finalExtension = when (selectedMediaType) {
+        MediaType.DIRECT_FILE -> detectedExtension
+        MediaType.VIDEO -> selectedCodec?.extension ?: "mp4"
+        MediaType.AUDIO -> selectedCodec?.extension ?: "m4a"
+    }
+
+    val finalTotalBytes = when (selectedMediaType) {
+        MediaType.DIRECT_FILE -> detectedMedia.directFileVariant?.fileSizeBytes?.takeIf { it > 0 } ?: 0L
+        MediaType.VIDEO -> {
+            selectedCodec?.matchedVariant?.fileSizeBytes?.takeIf { it > 0 }
+                ?: selectedQuality?.matchedVariant?.fileSizeBytes?.takeIf { it > 0 }
+                ?: MediaSizeCalculator.calculateVideoTotalBytes(
+                    height = selectedQuality?.height ?: 1080,
+                    codec = when (finalCodecName) {
+                        "AV1" -> VideoCodec.AV1
+                        "VP9" -> VideoCodec.VP9
+                        else -> VideoCodec.H264
+                    },
+                    durationSeconds = detectedMedia.durationSeconds
+                )
+        }
+        MediaType.AUDIO -> {
+            selectedCodec?.matchedVariant?.fileSizeBytes?.takeIf { it > 0 }
+                ?: selectedQuality?.matchedVariant?.fileSizeBytes?.takeIf { it > 0 }
+                ?: MediaSizeCalculator.calculateAudioTotalBytes(
+                    targetBitrateKbps = selectedQuality?.bitrateKbps ?: 256,
+                    codec = when (finalCodecName) {
+                        "Opus" -> AudioCodec.OPUS
+                        "MP3" -> AudioCodec.MP3
+                        else -> AudioCodec.M4A
+                    },
+                    durationSeconds = detectedMedia.durationSeconds
+                )
+        }
     }
 
     // Estimated download time at 65 Mbps (representative LTE / 5G / Wi-Fi)
@@ -620,22 +668,35 @@ fun DownloadConfigContent(
                             .clip(RoundedCornerShape(16.dp))
                             .background(
                                 Brush.linearGradient(
-                                    if (selectedMediaType == MediaType.VIDEO) {
-                                        listOf(Color(0xFF00E5FF), Color(0xFF0052D4))
-                                    } else {
-                                        listOf(Color(0xFFB388FF), Color(0xFF651FFF))
+                                    when (selectedMediaType) {
+                                        MediaType.DIRECT_FILE -> listOf(Color(0xFF00E676), Color(0xFF00897B))
+                                        MediaType.VIDEO -> listOf(Color(0xFF00E5FF), Color(0xFF0052D4))
+                                        MediaType.AUDIO -> listOf(Color(0xFFB388FF), Color(0xFF651FFF))
                                     }
                                 )
                             )
                             .border(
                                 1.dp,
-                                if (selectedMediaType == MediaType.VIDEO) Color(0xFF00E5FF).copy(0.7f) else Color(0xFFB388FF).copy(0.7f),
+                                when (selectedMediaType) {
+                                    MediaType.DIRECT_FILE -> Color(0xFF00E676).copy(0.7f)
+                                    MediaType.VIDEO -> Color(0xFF00E5FF).copy(0.7f)
+                                    MediaType.AUDIO -> Color(0xFFB388FF).copy(0.7f)
+                                },
                                 RoundedCornerShape(16.dp)
                             ),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (selectedMediaType == MediaType.VIDEO) Icons.Default.Movie else Icons.Default.Audiotrack,
+                            imageVector = when (selectedMediaType) {
+                                MediaType.DIRECT_FILE -> when (detectedExtension) {
+                                    "apk", "xapk", "apks" -> Icons.Default.Android
+                                    "zip", "rar", "7z", "tar", "gz", "bz2", "xz" -> Icons.Default.FolderZip
+                                    "pdf" -> Icons.Default.PictureAsPdf
+                                    else -> Icons.AutoMirrored.Filled.InsertDriveFile
+                                }
+                                MediaType.VIDEO -> Icons.Default.Movie
+                                MediaType.AUDIO -> Icons.Default.Audiotrack
+                            },
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(28.dp)
@@ -713,7 +774,11 @@ fun DownloadConfigContent(
 
                         // Stream Quality Telemetry Tag
                         Text(
-                            text = if (selectedMediaType == MediaType.VIDEO) "High-Definition Video Stream Available" else "Direct Hi-Res Audio Stream Available",
+                            text = when (selectedMediaType) {
+                                MediaType.DIRECT_FILE -> "Direct ${detectedExtension.uppercase(Locale.ROOT)} File Available"
+                                MediaType.VIDEO -> "High-Definition Video Stream Available"
+                                MediaType.AUDIO -> "Direct Hi-Res Audio Stream Available"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF7591A3)
                         )
@@ -778,14 +843,24 @@ fun DownloadConfigContent(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF142B3A))
+                                .background(
+                                    when (selectedMediaType) {
+                                        MediaType.DIRECT_FILE -> Color(0xFF00E676).copy(alpha = 0.15f)
+                                        MediaType.VIDEO -> Color(0xFF142B3A)
+                                        MediaType.AUDIO -> Color(0xFF651FFF).copy(alpha = 0.2f)
+                                    }
+                                )
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = ".$finalExtension",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00E5FF)
+                                color = when (selectedMediaType) {
+                                    MediaType.DIRECT_FILE -> Color(0xFF00E676)
+                                    MediaType.VIDEO -> Color(0xFF00E5FF)
+                                    MediaType.AUDIO -> Color(0xFFB388FF)
+                                }
                             )
                         }
 
@@ -862,10 +937,110 @@ fun DownloadConfigContent(
             }
         }
 
-        // =========================================================================
-        // 3. STAGE 1: MEDIA TYPE SELECTOR (APPLE FLOATING PILL SLIDER)
-        // =========================================================================
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (selectedMediaType == MediaType.DIRECT_FILE) {
+            // Direct File Specification Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0C1924)),
+                border = BorderStroke(1.dp, Color(0xFF00E676).copy(alpha = 0.35f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF00E676).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = when (detectedExtension) {
+                                        "apk", "xapk", "apks" -> Icons.Default.Android
+                                        "zip", "rar", "7z", "tar", "gz", "bz2", "xz" -> Icons.Default.FolderZip
+                                        "pdf" -> Icons.Default.PictureAsPdf
+                                        else -> Icons.AutoMirrored.Filled.InsertDriveFile
+                                    },
+                                    contentDescription = null,
+                                    tint = Color(0xFF00E676),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = finalQualityLabel,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "Native File Extension: .${detectedExtension.lowercase(Locale.ROOT)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF88A4B5)
+                                )
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF00E676).copy(alpha = 0.18f))
+                                .border(1.dp, Color(0xFF00E676).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 9.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = detectedExtension.uppercase(Locale.ROOT),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFF00E676)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = Color(0xFF1B3244))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Detected Size", style = MaterialTheme.typography.bodySmall, color = Color(0xFF7591A3))
+                            Text(
+                                text = if (finalTotalBytes > 0) MediaSizeCalculator.formatFileSize(finalTotalBytes) else "Server Stream (Dynamic)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF00E676)
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Download Protocol", style = MaterialTheme.typography.bodySmall, color = Color(0xFF7591A3))
+                            Text(
+                                text = "Multi-Socket Parallel ($selectedThreadCount Threads)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // =========================================================================
+            // 3. STAGE 1: MEDIA TYPE SELECTOR (APPLE FLOATING PILL SLIDER)
+            // =========================================================================
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 text = "1. Select Media Type",
                 style = MaterialTheme.typography.labelLarge,
@@ -1356,6 +1531,7 @@ fun DownloadConfigContent(
                 }
             }
         }
+    }
 
         // =========================================================================
         // 7. ADVANCED DOWNLOAD CONFIGURATION (COLLAPSIBLE TURBO CARD)
@@ -1591,11 +1767,15 @@ fun DownloadConfigContent(
                     scaleX = buttonScale
                     scaleY = buttonScale
                 }
-                .shadow(16.dp, RoundedCornerShape(16.dp), spotColor = Color(0x6600E5FF))
+                .shadow(16.dp, RoundedCornerShape(16.dp), spotColor = if (selectedMediaType == MediaType.DIRECT_FILE) Color(0x6600E676) else Color(0x6600E5FF))
                 .clip(RoundedCornerShape(16.dp))
                 .background(
                     Brush.horizontalGradient(
-                        listOf(Color(0xFF00E5FF), Color(0xFF0084FF))
+                        if (selectedMediaType == MediaType.DIRECT_FILE) {
+                            listOf(Color(0xFF00E676), Color(0xFF00B0FF))
+                        } else {
+                            listOf(Color(0xFF00E5FF), Color(0xFF0084FF))
+                        }
                     )
                 )
                 .clickable(interactionSource = buttonSource, indication = null) {
@@ -1607,13 +1787,28 @@ fun DownloadConfigContent(
                         "$editableFileName.$finalExtension"
                     }
 
-                    val downloadUrl = selectedCodec?.matchedVariant?.url
-                        ?: selectedQuality?.matchedVariant?.url
-                        ?: detectedMedia.directFileUrl
-                        ?: detectedMedia.pageUrl
+                    val downloadUrl = if (selectedMediaType == MediaType.DIRECT_FILE) {
+                        detectedMedia.directFileVariant?.url ?: detectedMedia.directFileUrl ?: detectedMedia.pageUrl
+                    } else {
+                        selectedCodec?.matchedVariant?.url
+                            ?: selectedQuality?.matchedVariant?.url
+                            ?: detectedMedia.directFileUrl
+                    }
 
-                    val pairedAudioUrl = selectedCodec?.matchedVariant?.pairedAudioStreamUrl
-                        ?: selectedQuality?.matchedVariant?.pairedAudioStreamUrl
+                    if (downloadUrl == null) {
+                        Toast.makeText(context, "No stream URL found for download", Toast.LENGTH_SHORT).show()
+                        return@clickable
+                    }
+
+                    val pairedAudioUrl = if (selectedMediaType == MediaType.DIRECT_FILE) null else {
+                        selectedCodec?.matchedVariant?.pairedAudioStreamUrl
+                            ?: selectedQuality?.matchedVariant?.pairedAudioStreamUrl
+                    }
+
+                    val formatId = if (selectedMediaType == MediaType.DIRECT_FILE) "direct" else {
+                        selectedCodec?.matchedVariant?.formatId
+                            ?: selectedQuality?.matchedVariant?.formatId
+                    }
 
                     onEnqueueDownload(
                         detectedMedia.pageTitle,
@@ -1626,7 +1821,8 @@ fun DownloadConfigContent(
                         selectedThreadCount,
                         destinationFolder,
                         finalTotalBytes,
-                        detectedMedia.pageUrl
+                        detectedMedia.pageUrl,
+                        formatId
                     )
                     onDismiss()
                 },
@@ -1644,7 +1840,11 @@ fun DownloadConfigContent(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Download $finalQualityLabel • $finalCodecName (${MediaSizeCalculator.formatFileSize(finalTotalBytes)})",
+                    text = if (selectedMediaType == MediaType.DIRECT_FILE) {
+                        "Download ${detectedExtension.uppercase(Locale.ROOT)} (${if (finalTotalBytes > 0) MediaSizeCalculator.formatFileSize(finalTotalBytes) else "Direct File"})"
+                    } else {
+                        "Download $finalQualityLabel • $finalCodecName (${MediaSizeCalculator.formatFileSize(finalTotalBytes)})"
+                    },
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFF001F29)
@@ -1770,7 +1970,7 @@ fun DownloadConfigBottomSheetPreview() {
             DownloadConfigContent(
                 detectedMedia = sampleDetected,
                 onDismiss = {},
-                onEnqueueDownload = { _, _, _, _, _, _, _, _, _, _, _ -> }
+                onEnqueueDownload = { _, _, _, _, _, _, _, _, _, _, _, _ -> }
             )
         }
     }

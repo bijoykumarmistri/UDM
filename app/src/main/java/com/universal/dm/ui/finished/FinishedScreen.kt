@@ -52,12 +52,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -105,6 +109,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -245,7 +250,9 @@ fun FinishedScreenContent(
     onDeleteTask: (DownloadTaskEntity, Boolean) -> Unit,
     onDeleteMultipleTasks: (List<DownloadTaskEntity>, Boolean) -> Unit,
     onClearHistory: (Boolean) -> Unit,
-    onDismissPreview: () -> Unit
+    onDismissPreview: () -> Unit,
+    onSwitchToActive: () -> Unit = {},
+    onNavigateToBrowser: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
@@ -388,7 +395,9 @@ fun FinishedScreenContent(
                         EmptyLibraryStateCard(
                             searchQuery = searchQuery,
                             selectedCategory = selectedCategory,
-                            onOpenFolder = { openUdmFolder(context) }
+                            onOpenFolder = { openUdmFolder(context) },
+                            onSwitchToActive = onSwitchToActive,
+                            onNavigateToBrowser = onNavigateToBrowser
                         )
                     }
                 }
@@ -492,7 +501,9 @@ fun FinishedScreenContent(
                         EmptyLibraryStateCard(
                             searchQuery = searchQuery,
                             selectedCategory = selectedCategory,
-                            onOpenFolder = { openUdmFolder(context) }
+                            onOpenFolder = { openUdmFolder(context) },
+                            onSwitchToActive = onSwitchToActive,
+                            onNavigateToBrowser = onNavigateToBrowser
                         )
                     }
                 }
@@ -723,6 +734,8 @@ fun LibraryTopHeader(
     onToggleSelectionMode: () -> Unit,
     onOpenMenu: () -> Unit
 ) {
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -732,18 +745,20 @@ fun LibraryTopHeader(
     ) {
         Column {
             Text(
-                text = "Library",
+                text = "Finished",
                 style = MaterialTheme.typography.headlineMedium.copy(
                     fontSize = 28.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = (-0.5).sp
                 ),
-                color = Color.White
+                color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 text = if (isSelectionMode) "$selectedCount selected of $fileCount" else "$fileCount files • ${formatStorageSize(totalBytes)} library storage",
                 style = MaterialTheme.typography.bodySmall,
-                color = if (isSelectionMode) Color(0xFF00E5FF) else Color(0xFF8BA6B9)
+                color = if (isSelectionMode) {
+                    if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary
+                } else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
@@ -752,18 +767,32 @@ fun LibraryTopHeader(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Search toggle button
+            val searchBtnBg = if (isSearchExpanded) {
+                if (isDark) Color(0xFF00E5FF).copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer
+            } else {
+                if (isDark) Color(0xFF0C1924) else MaterialTheme.colorScheme.surfaceContainerHigh
+            }
+            val searchBtnBorder = if (isSearchExpanded) {
+                BorderStroke(1.dp, if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary)
+            } else {
+                BorderStroke(1.dp, if (isDark) Color(0xFF1B3547) else MaterialTheme.colorScheme.outlineVariant)
+            }
+            val searchBtnTint = if (isSearchExpanded) {
+                if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.onPrimaryContainer
+            } else MaterialTheme.colorScheme.onSurfaceVariant
+
             Surface(
                 onClick = onToggleSearch,
                 shape = CircleShape,
-                color = if (isSearchExpanded) Color(0xFF00E5FF).copy(alpha = 0.2f) else Color(0xFF0C1924),
-                border = BorderStroke(1.dp, if (isSearchExpanded) Color(0xFF00E5FF) else Color(0xFF1B3547)),
+                color = searchBtnBg,
+                border = searchBtnBorder,
                 modifier = Modifier.size(38.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = if (isSearchExpanded) Icons.Default.Close else Icons.Default.Search,
                         contentDescription = "Search",
-                        tint = if (isSearchExpanded) Color(0xFF00E5FF) else Color(0xFF8BA6B9),
+                        tint = searchBtnTint,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -903,11 +932,9 @@ fun LibraryStorageHeroCard(
     totalFiles: Int,
     onOpenFolder: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(26.dp),
-        color = Color(0xFF08141F),
-        border = BorderStroke(
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val storageCardBorder = if (isDark) {
+        BorderStroke(
             1.dp,
             Brush.horizontalGradient(
                 listOf(
@@ -917,6 +944,23 @@ fun LibraryStorageHeroCard(
                 )
             )
         )
+    } else {
+        BorderStroke(
+            1.dp,
+            Brush.horizontalGradient(
+                listOf(
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
+                )
+            )
+        )
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(26.dp),
+        color = if (isDark) Color(0xFF08141F) else MaterialTheme.colorScheme.surfaceContainerLow,
+        border = storageCardBorder
     ) {
         Column(
             modifier = Modifier
@@ -1310,11 +1354,19 @@ fun LuxuryCompletedMediaCard(
         MediaType.DIRECT_FILE -> Color(0xFF00E676)
     }
 
+    val ext = task.fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
     val typeIcon = when (task.mediaType) {
         MediaType.VIDEO -> Icons.Default.Movie
         MediaType.AUDIO -> Icons.Default.Audiotrack
-        MediaType.DIRECT_FILE -> Icons.AutoMirrored.Filled.InsertDriveFile
+        MediaType.DIRECT_FILE -> when (ext) {
+            "apk", "xapk", "apks" -> Icons.Default.Android
+            "zip", "rar", "7z", "tar", "gz" -> Icons.Default.FolderZip
+            "pdf" -> Icons.Default.PictureAsPdf
+            else -> Icons.AutoMirrored.Filled.InsertDriveFile
+        }
     }
+
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 
     Surface(
         modifier = Modifier
@@ -1326,10 +1378,18 @@ fun LuxuryCompletedMediaCard(
                 onLongClick = onLongClick
             ),
         shape = RoundedCornerShape(22.dp),
-        color = if (isSelected) Color(0xFF0B2131) else Color(0xFF091622),
+        color = if (isSelected) {
+            if (isDark) Color(0xFF0B2131) else MaterialTheme.colorScheme.primaryContainer
+        } else {
+            if (isDark) Color(0xFF091622) else MaterialTheme.colorScheme.surfaceContainerLow
+        },
         border = BorderStroke(
             1.dp,
-            if (isSelected) Color(0xFF00E5FF) else Color(0xFF132838)
+            if (isSelected) {
+                if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary
+            } else {
+                if (isDark) Color(0xFF132838) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+            }
         )
     ) {
         Column(
@@ -1385,7 +1445,7 @@ fun LuxuryCompletedMediaCard(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp
                             ),
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1427,18 +1487,56 @@ fun LuxuryCompletedMediaCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Codec & Quality badge
+                val ext = task.fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+                val badgeText = remember(task, ext) {
+                    when {
+                        task.mediaType == MediaType.DIRECT_FILE || ext in listOf("apk", "xapk", "apks", "zip", "rar", "7z", "tar", "gz", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "exe", "dmg", "iso", "bin") -> {
+                            if (ext.isNotEmpty()) ext.uppercase(Locale.ROOT) else "FILE"
+                        }
+                        task.mediaType == MediaType.AUDIO -> {
+                            when {
+                                task.codecLabel.isNotBlank() && task.qualityLabel.isNotBlank() && task.codecLabel != task.qualityLabel -> {
+                                    task.codecLabel.uppercase(Locale.ROOT)
+                                }
+                                task.codecLabel.isNotBlank() -> task.codecLabel.uppercase(Locale.ROOT)
+                                task.qualityLabel.isNotBlank() -> task.qualityLabel.replace(" kbps", "k").uppercase(Locale.ROOT)
+                                ext.isNotEmpty() -> ext.uppercase(Locale.ROOT)
+                                else -> "AUDIO"
+                            }
+                        }
+                        else -> {
+                            val qualityClean = task.qualityLabel
+                                .replace(" Ultra HD", "")
+                                .replace(" Full HD", "")
+                                .replace(" FHD", "")
+                                .replace(" HD", "")
+                                .trim()
+                            when {
+                                qualityClean.isNotBlank() && !qualityClean.contains("Video", ignoreCase = true) && !qualityClean.contains("Stream", ignoreCase = true) -> {
+                                    qualityClean
+                                }
+                                task.codecLabel.isNotBlank() -> task.codecLabel.uppercase(Locale.ROOT)
+                                ext.isNotEmpty() -> ext.uppercase(Locale.ROOT)
+                                else -> "VIDEO"
+                            }
+                        }
+                    }
+                }
+
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = themeColor.copy(alpha = 0.12f),
                     border = BorderStroke(1.dp, themeColor.copy(alpha = 0.35f))
                 ) {
                     Text(
-                        text = "${task.codecLabel} • ${task.qualityLabel}",
+                        text = badgeText,
                         style = TextStyle(
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = themeColor
                         ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -1533,10 +1631,16 @@ fun LuxuryCompletedGridCard(
         MediaType.DIRECT_FILE -> Color(0xFF00E676)
     }
 
+    val ext = task.fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
     val typeIcon = when (task.mediaType) {
         MediaType.VIDEO -> Icons.Default.Movie
         MediaType.AUDIO -> Icons.Default.Audiotrack
-        MediaType.DIRECT_FILE -> Icons.AutoMirrored.Filled.InsertDriveFile
+        MediaType.DIRECT_FILE -> when (ext) {
+            "apk", "xapk", "apks" -> Icons.Default.Android
+            "zip", "rar", "7z", "tar", "gz" -> Icons.Default.FolderZip
+            "pdf" -> Icons.Default.PictureAsPdf
+            else -> Icons.AutoMirrored.Filled.InsertDriveFile
+        }
     }
 
     Surface(
@@ -1671,7 +1775,9 @@ fun LuxuryCompletedGridCard(
 fun EmptyLibraryStateCard(
     searchQuery: String,
     selectedCategory: String,
-    onOpenFolder: () -> Unit
+    onOpenFolder: () -> Unit,
+    onSwitchToActive: () -> Unit = {},
+    onNavigateToBrowser: () -> Unit = {}
 ) {
     Surface(
         modifier = Modifier
@@ -1733,30 +1839,62 @@ fun EmptyLibraryStateCard(
                 )
             }
 
-            Surface(
-                onClick = onOpenFolder,
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF00E5FF).copy(alpha = 0.15f),
-                border = BorderStroke(1.dp, Color(0xFF00E5FF))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    onClick = onOpenFolder,
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFF00E5FF).copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, Color(0xFF00E5FF))
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.FolderOpen,
-                        contentDescription = null,
-                        tint = Color(0xFF00E5FF),
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = "Browse Storage Folder",
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00E5FF)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FolderOpen,
+                            contentDescription = null,
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(18.dp)
                         )
-                    )
+                        Text(
+                            text = "Storage",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF00E5FF)
+                            )
+                        )
+                    }
+                }
+
+                Surface(
+                    onClick = onSwitchToActive,
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFF0E2230),
+                    border = BorderStroke(1.dp, Color(0xFF1B3D52))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Bolt,
+                            contentDescription = null,
+                            tint = Color(0xFF8BA6B9),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Active Queue",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF8BA6B9)
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -1911,8 +2049,10 @@ private fun openUdmFolder(context: Context) {
 }
 
 private fun shareMedia(context: Context, task: DownloadTaskEntity) {
+    val fileExt = task.fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+    val resolvedMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(fileExt)
     val shareIntent = Intent(Intent.ACTION_SEND).apply {
-        type = if (task.mediaType == MediaType.VIDEO) "video/*" else if (task.mediaType == MediaType.AUDIO) "audio/*" else "*/*"
+        type = resolvedMime ?: if (task.mediaType == MediaType.VIDEO) "video/*" else if (task.mediaType == MediaType.AUDIO) "audio/*" else "*/*"
         if (task.filePath.startsWith("content://")) {
             putExtra(Intent.EXTRA_STREAM, Uri.parse(task.filePath))
         } else {
@@ -1927,7 +2067,7 @@ private fun shareMedia(context: Context, task: DownloadTaskEntity) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
-    context.startActivity(Intent.createChooser(shareIntent, "Share Media").apply {
+    context.startActivity(Intent.createChooser(shareIntent, "Share File").apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     })
 }
@@ -1940,10 +2080,22 @@ private fun openExternalFile(context: Context, task: DownloadTaskEntity) {
                 FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
             }.getOrNull() ?: Uri.fromFile(file)
 
+            val fileExt = (file.extension.ifEmpty { task.fileName.substringAfterLast('.', "") }).lowercase(Locale.ROOT)
+            val resolvedMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(fileExt)
+
             val mimeType = when (task.mediaType) {
-                MediaType.VIDEO -> "video/*"
-                MediaType.AUDIO -> "audio/*"
-                MediaType.DIRECT_FILE -> "*/*"
+                MediaType.VIDEO -> resolvedMime ?: "video/*"
+                MediaType.AUDIO -> resolvedMime ?: "audio/*"
+                MediaType.DIRECT_FILE -> when (fileExt) {
+                    "apk" -> "application/vnd.android.package-archive"
+                    "pdf" -> "application/pdf"
+                    "zip" -> "application/zip"
+                    "tar" -> "application/x-tar"
+                    "gz" -> "application/gzip"
+                    "7z" -> "application/x-7z-compressed"
+                    "rar" -> "application/vnd.rar"
+                    else -> resolvedMime ?: "*/*"
+                }
             }
 
             val intent = Intent(Intent.ACTION_VIEW).apply {

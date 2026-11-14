@@ -2,7 +2,12 @@ package com.universal.dm.ui.navigation
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -30,6 +35,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -41,6 +47,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -66,20 +73,24 @@ fun UdmBottomNav(
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 
-    // Dock styling colors matching reference design
+    // Dock styling colors matching reference design, adapting to light and dark themes
     val dockBackground = Brush.verticalGradient(
-        colors = listOf(
-            Color(0xF809141D),
-            Color(0xF8050C13)
-        )
+        colors = if (isDark) {
+            listOf(Color(0xF809141D), Color(0xF8050C13))
+        } else {
+            listOf(Color(0xF2FFFFFF), Color(0xF2F0F5F8))
+        }
     )
-    val dockBorderColor = Color(0xFF142B39)
-    val activeBorderColor = Color(0xFF00A8C6)
-    val activeFillColor = Color(0x80072834)
-    val activeIconColor = Color(0xFF00E5FF)
-    val inactiveIconColor = Color(0xFF637C8E)
-    val activeTextColor = Color(0xFFFFFFFF)
+    val dockBorderColor = if (isDark) Color(0xFF142B39) else Color(0xFFD4E2EB)
+    val activeBorderColor = if (isDark) Color(0xFF00A8C6) else MaterialTheme.colorScheme.primary
+    val activeFillColor = if (isDark) Color(0x80072834) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+    val activeIconColor = if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary
+    val inactiveIconColor = if (isDark) Color(0xFF637C8E) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+    val activeTextColor = if (isDark) Color(0xFFFFFFFF) else MaterialTheme.colorScheme.primary
+    val shadowSpotColor = if (isDark) Color(0x99000000) else Color(0x22000000)
+    val shadowAmbientColor = if (isDark) Color(0x3300C4D6) else Color(0x10006874)
 
     Box(
         modifier = modifier
@@ -95,8 +106,8 @@ fun UdmBottomNav(
                 .shadow(
                     elevation = 20.dp,
                     shape = CircleShape,
-                    spotColor = Color(0x99000000),
-                    ambientColor = Color(0x3300C4D6)
+                    spotColor = shadowSpotColor,
+                    ambientColor = shadowAmbientColor
                 )
                 .clip(CircleShape)
                 .background(dockBackground)
@@ -119,41 +130,50 @@ fun UdmBottomNav(
                     val interactionSource = remember { MutableInteractionSource() }
                     val isPressed by interactionSource.collectIsPressedAsState()
 
-                    // Apple-style micro-bounce and press physics
+                    // Apple-grade micro-bounce and press physics optimized for fluid response
                     val pressScale by animateFloatAsState(
-                        targetValue = if (isPressed) 0.92f else 1.0f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessMediumLow
-                        ),
+                        targetValue = if (isPressed) 0.93f else 1.0f,
+                        animationSpec = if (isPressed) {
+                            tween(durationMillis = 80, easing = LinearOutSlowInEasing)
+                        } else {
+                            spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow)
+                        },
                         label = "PressScale"
                     )
 
                     val iconScale by animateFloatAsState(
-                        targetValue = if (isSelected) 1.06f else 0.98f,
+                        targetValue = if (isSelected) 1.08f else 0.95f,
                         animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessLow
+                            dampingRatio = 0.72f,
+                            stiffness = Spring.StiffnessMediumLow
                         ),
                         label = "IconScale"
                     )
 
+                    val pillEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
                     val itemBorderColor by animateColorAsState(
                         targetValue = if (isSelected) activeBorderColor else Color.Transparent,
-                        animationSpec = spring(dampingRatio = 0.85f),
+                        animationSpec = tween(durationMillis = 180, easing = pillEasing),
                         label = "ItemBorderColor"
                     )
 
                     val itemBackgroundColor by animateColorAsState(
                         targetValue = if (isSelected) activeFillColor else Color.Transparent,
-                        animationSpec = spring(dampingRatio = 0.85f),
+                        animationSpec = tween(durationMillis = 180, easing = pillEasing),
                         label = "ItemBackgroundColor"
                     )
 
                     val iconColor by animateColorAsState(
                         targetValue = if (isSelected) activeIconColor else inactiveIconColor,
-                        animationSpec = tween(durationMillis = 200),
+                        animationSpec = tween(durationMillis = 180, easing = pillEasing),
                         label = "IconColor"
+                    )
+
+                    val horizontalPadding by animateDpAsState(
+                        targetValue = if (isSelected) 16.dp else 13.dp,
+                        animationSpec = tween(durationMillis = 180, easing = pillEasing),
+                        label = "HorizontalPadding"
                     )
 
                     // Individual Tab Pill Container
@@ -180,7 +200,7 @@ fun UdmBottomNav(
                                 }
                             }
                             .padding(
-                                horizontal = if (isSelected) 16.dp else 14.dp,
+                                horizontal = horizontalPadding,
                                 vertical = 8.dp
                             ),
                         contentAlignment = Alignment.Center
@@ -226,24 +246,19 @@ fun UdmBottomNav(
                                 )
                             }
 
-                            // Fluid expansion of label text only when selected
+                            // Fluid expansion of label text only when selected without sluggish dock wobbling
+                            val navEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
                             AnimatedVisibility(
                                 visible = isSelected,
                                 enter = fadeIn(
-                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                                    animationSpec = tween(durationMillis = 180, easing = navEasing)
                                 ) + expandHorizontally(
-                                    animationSpec = spring(
-                                        dampingRatio = 0.82f,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
+                                    animationSpec = tween(durationMillis = 180, easing = navEasing)
                                 ),
                                 exit = fadeOut(
-                                    animationSpec = tween(durationMillis = 120)
+                                    animationSpec = tween(durationMillis = 120, easing = FastOutLinearInEasing)
                                 ) + shrinkHorizontally(
-                                    animationSpec = spring(
-                                        dampingRatio = 0.82f,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
+                                    animationSpec = tween(durationMillis = 150, easing = navEasing)
                                 )
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -304,18 +319,6 @@ fun UdmBottomNavDownloadPreview() {
             currentScreen = Screen.Downloads,
             onScreenSelected = {},
             badgeCount = 2
-        )
-    }
-}
-
-@androidx.compose.ui.tooling.preview.Preview(showBackground = true, backgroundColor = 0xFF0E1415)
-@Composable
-fun UdmBottomNavFinishedPreview() {
-    Box(modifier = Modifier.padding(16.dp)) {
-        UdmBottomNav(
-            currentScreen = Screen.Finished,
-            onScreenSelected = {},
-            badgeCount = 0
         )
     }
 }

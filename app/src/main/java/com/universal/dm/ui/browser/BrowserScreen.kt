@@ -17,7 +17,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -26,14 +29,17 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -52,6 +58,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -127,6 +134,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -287,7 +295,12 @@ private fun BrowserScreenContent(
                 appSettingsAdBlocker = appSettings.isAdBlockerEnabled,
                 onAdBlockerToggle = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    appSettings.isAdBlockerEnabled = !appSettings.isAdBlockerEnabled
+                    appSettings.updateAdBlocker(!appSettings.isAdBlockerEnabled)
+                },
+                appSettingsDnsFilter = appSettings.isDnsFilterEnabled,
+                onDnsFilterToggle = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    appSettings.updateDnsFilter(!appSettings.isDnsFilterEnabled)
                 },
                 onUrlChanged = { viewModel.onUrlInputChanged(it) },
                 onGo = { viewModel.loadUrl(uiState.urlInput) },
@@ -349,12 +362,47 @@ private fun BrowserScreenContent(
                 onReload = {
                     webViewInstance?.reload()
                     viewModel.dismissMenu()
+                },
+                onManualSniff = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    val currentUrl = webViewInstance?.url ?: uiState.currentLoadedUrl
+                    val currentTitle = webViewInstance?.title ?: uiState.pageTitle
+                    android.util.Log.d("BrowserScreen", "onManualSniff invoked: currentUrl=$currentUrl, loadedUrl=${uiState.currentLoadedUrl}, detectedMedia=${uiState.detectedMediaState != null}")
+                    if (uiState.detectedMediaState != null) {
+                        viewModel.showBottomSheet()
+                    } else {
+                        webViewInstance?.evaluateJavascript(MediaSniffer.JS_MEDIA_SCANNER, null)
+                        if (currentUrl != null) {
+                            viewModel.manualSniffCurrentPage(url = currentUrl, fallbackTitle = currentTitle)
+                        }
+                    }
                 }
             )
 
-            // 2. Viewport: Dashboard vs WebView
-            if (uiState.currentLoadedUrl == null) {
-                BrowserHomeDashboard(
+            // 2. Viewport: Dashboard vs WebView with smooth Fade & Scale settle transition
+            AnimatedContent(
+                targetState = uiState.currentLoadedUrl == null,
+                transitionSpec = {
+                    val viewportEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+                    (fadeIn(
+                        animationSpec = tween(durationMillis = 220, easing = LinearOutSlowInEasing)
+                    ) + scaleIn(
+                        initialScale = 0.985f,
+                        animationSpec = tween(durationMillis = 220, easing = viewportEasing)
+                    )) togetherWith (fadeOut(
+                        animationSpec = tween(durationMillis = 150, easing = FastOutLinearInEasing)
+                    ) + scaleOut(
+                        targetScale = 0.985f,
+                        animationSpec = tween(durationMillis = 150, easing = FastOutLinearInEasing)
+                    ))
+                },
+                label = "BrowserViewportTransition",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) { isHome ->
+                if (isHome) {
+                    BrowserHomeDashboard(
                     isIncognito = uiState.isIncognito,
                     selectedSearchEngine = uiState.selectedSearchEngine,
                     favourites = uiState.favourites,
@@ -384,9 +432,7 @@ private fun BrowserScreenContent(
                 var lastLoadedProgrammaticUrl by remember { mutableStateOf<String?>(null) }
 
                 AndroidView(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
+                    modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->
                         WebView(ctx).apply {
                             layoutParams = ViewGroup.LayoutParams(
@@ -399,8 +445,9 @@ private fun BrowserScreenContent(
                             settings.domStorageEnabled = true
                             settings.databaseEnabled = true
                             settings.mediaPlaybackRequiresUserGesture = false
-                            settings.loadWithOverviewMode = true
+                            settings.loadWithOverviewMode = uiState.isDesktopMode
                             settings.useWideViewPort = true
+                            settings.textZoom = 100
                             settings.setSupportMultipleWindows(true)
                             settings.javaScriptCanOpenWindowsAutomatically = false
                             settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
@@ -421,20 +468,22 @@ private fun BrowserScreenContent(
                             addJavascriptInterface(object {
                                 @JavascriptInterface
                                 fun onMediaFound(mediaUrl: String) {
+                                    android.util.Log.d("BrowserScreen", "JS onMediaFound: $mediaUrl")
                                     val currentMedia = viewModel.uiState.value.detectedMediaState
                                     val isChunkOrBlob = mediaUrl.startsWith("blob:") || mediaUrl.contains("videoplayback")
                                     if (currentMedia == null && !isChunkOrBlob) {
                                         mainHandler.post {
-                                            viewModel.triggerMediaExtraction(mediaUrl, title)
+                                            viewModel.triggerMediaExtraction(mediaUrl, title, autoShowBottomSheet = false)
                                         }
                                     }
                                 }
 
                                 @JavascriptInterface
                                 fun onUrlChanged(newUrl: String) {
+                                    android.util.Log.d("BrowserScreen", "JS onUrlChanged: $newUrl")
                                     mainHandler.post {
                                         lastLoadedProgrammaticUrl = newUrl
-                                        viewModel.onPageStarted(newUrl)
+                                        viewModel.onPageStarted(newUrl, isAutoSniffEnabled = true)
                                     }
                                 }
                             }, "UdmMediaBridge")
@@ -473,20 +522,21 @@ private fun BrowserScreenContent(
                                 ): WebResourceResponse? {
                                     val reqUrl = request?.url ?: return null
 
-                                    // Ad-blocker evaluation
-                                    if (appSettings.isAdBlockerEnabled &&
-                                        viewModel.adBlockerEngine.shouldBlockRequest(reqUrl)
-                                    ) {
+                                    // Ad-blocker & DNS-sinkhole evaluation
+                                    val isHostBlocked = appSettings.isDnsFilterEnabled && reqUrl.host?.let { viewModel.adBlockerEngine.isHostBlocked(it) } == true
+                                    val isAdBlocked = appSettings.isAdBlockerEnabled && viewModel.adBlockerEngine.shouldBlockRequest(reqUrl)
+
+                                    if (isHostBlocked || isAdBlocked) {
                                         mainHandler.post { viewModel.onAdBlocked() }
                                         return viewModel.adBlockerEngine.createEmptyResourceResponse()
                                     }
 
-                                    // Sniff media stream requests (.m3u8, .mpd, .mp4, .m4a)
+                                    // Sniff media stream requests (.m3u8, .mpd, .mp4, .m4a) only if auto-sniff is enabled
                                     val urlString = reqUrl.toString()
                                     val pageUrl = viewModel.uiState.value.currentLoadedUrl ?: ""
                                     val isOnKnownPlatform = viewModel.mediaSniffer.isSupportedPlatformUrl(pageUrl)
 
-                                    if (!isOnKnownPlatform && viewModel.mediaSniffer.isMediaOrDownloadableUrl(urlString)) {
+                                    if (appSettings.isAutoSnifferEnabled && !isOnKnownPlatform && viewModel.mediaSniffer.isMediaOrDownloadableUrl(urlString)) {
                                         val currentMedia = viewModel.uiState.value.detectedMediaState
                                         val isChunkOrSegment = urlString.contains("videoplayback") || urlString.contains("range=") || urlString.contains(".ts")
                                         if (currentMedia == null && !isChunkOrSegment) {
@@ -504,7 +554,7 @@ private fun BrowserScreenContent(
                                     super.onPageStarted(view, url, favicon)
                                     if (url.isNullOrBlank() || url.equals("about:blank", ignoreCase = true)) return
                                     lastLoadedProgrammaticUrl = url
-                                    viewModel.onPageStarted(url)
+                                    viewModel.onPageStarted(url, appSettings.isAutoSnifferEnabled)
                                     viewModel.onNavigationStateChanged(canGoBack(), canGoForward())
                                 }
 
@@ -520,7 +570,7 @@ private fun BrowserScreenContent(
                                     super.onPageFinished(view, url)
                                     if (url.isNullOrBlank() || url.equals("about:blank", ignoreCase = true)) return
                                     lastLoadedProgrammaticUrl = url
-                                    viewModel.onPageFinished(url, view?.title)
+                                    viewModel.onPageFinished(url, view?.title, appSettings.isAutoSnifferEnabled)
                                     viewModel.onNavigationStateChanged(canGoBack(), canGoForward())
 
                                     if (appSettings.isAdBlockerEnabled) {
@@ -528,6 +578,7 @@ private fun BrowserScreenContent(
                                         view?.evaluateJavascript(AdBlockerEngine.BRAVE_YOUTUBE_SHIELD_JS, null)
                                     }
 
+                                    // Always inject SPA navigation & media scanner hook
                                     view?.evaluateJavascript(MediaSniffer.JS_MEDIA_SCANNER, null)
                                 }
                             }
@@ -571,6 +622,7 @@ private fun BrowserScreenContent(
                     },
                     update = { webView ->
                         webView.settings.javaScriptEnabled = uiState.isJavaScriptEnabled
+                        webView.settings.loadWithOverviewMode = uiState.isDesktopMode
                         if (uiState.isDesktopMode) {
                             webView.settings.userAgentString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         } else {
@@ -585,6 +637,7 @@ private fun BrowserScreenContent(
                 )
             }
         }
+    }
 
         // 3. Apple Dynamic Island Media Sniffer Banner (Floats cleanly above the bottom navigation dock)
         val hasMedia = uiState.detectedMediaState != null
@@ -594,12 +647,24 @@ private fun BrowserScreenContent(
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 84.dp, start = 16.dp, end = 16.dp)
+                .padding(bottom = 16.dp, start = 16.dp, end = 16.dp)
         ) {
             AnimatedVisibility(
                 visible = hasMedia || isExtracting,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn() + scaleIn(initialScale = 0.92f),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut() + scaleOut(targetScale = 0.92f)
+                enter = slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
+                ) + fadeIn(tween(180)) + scaleIn(
+                    initialScale = 0.9f,
+                    animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
+                ),
+                exit = slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = tween(180, easing = FastOutLinearInEasing)
+                ) + fadeOut(tween(140)) + scaleOut(
+                    targetScale = 0.9f,
+                    animationSpec = tween(180, easing = FastOutLinearInEasing)
+                )
             ) {
                 if (isExtracting) {
                     // Extracting Progress Pill
@@ -613,7 +678,7 @@ private fun BrowserScreenContent(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
@@ -626,11 +691,31 @@ private fun BrowserScreenContent(
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White
                             )
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x33FF5252))
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        viewModel.cancelSniffing()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Cancel Sniffing",
+                                    tint = Color(0xFFFF5252),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
                         }
                     }
-                } else if (media != null) {
+                } else if (media != null && (media.videoVariants.isNotEmpty() || media.audioVariants.isNotEmpty() || media.directFileUrl != null || media.directFileVariant != null)) {
                     // Media Detected Dynamic Island
-                    val totalVariants = media.videoVariants.size + media.audioVariants.size
+                    val isDirectFile = media.isDirectFile || (media.videoVariants.isEmpty() && media.audioVariants.isEmpty())
+                    val totalVariants = if (isDirectFile) 1 else (media.videoVariants.size + media.audioVariants.size)
+                    val islandAccentColor = if (isDirectFile) Color(0xFF00E676) else Color(0xFF00E5FF)
                     val interactionSource = remember { MutableInteractionSource() }
                     val isPressed by interactionSource.collectIsPressedAsState()
                     val islandScale by animateFloatAsState(
@@ -645,7 +730,7 @@ private fun BrowserScreenContent(
                                 scaleX = islandScale
                                 scaleY = islandScale
                             }
-                            .shadow(24.dp, CircleShape, spotColor = Color(0xAA000000), ambientColor = Color(0x4400E5FF))
+                            .shadow(24.dp, CircleShape, spotColor = Color(0xAA000000), ambientColor = islandAccentColor.copy(alpha = 0.25f))
                             .clip(CircleShape)
                             .background(
                                 Brush.horizontalGradient(
@@ -655,7 +740,7 @@ private fun BrowserScreenContent(
                                     )
                                 )
                             )
-                            .border(1.5.dp, Color(0xFF00E5FF), CircleShape)
+                            .border(1.5.dp, islandAccentColor, CircleShape)
                             .clickable(
                                 interactionSource = interactionSource,
                                 indication = null
@@ -673,12 +758,12 @@ private fun BrowserScreenContent(
                                 modifier = Modifier
                                     .size(32.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF00E5FF)),
+                                    .background(islandAccentColor),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Download,
-                                    contentDescription = "Download Streams",
+                                    contentDescription = if (isDirectFile) "Download File" else "Download Streams",
                                     tint = Color(0xFF001F24),
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -687,7 +772,7 @@ private fun BrowserScreenContent(
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = "$totalVariants Streams Available",
+                                        text = if (isDirectFile) (media.directFileVariant?.qualityLabel ?: "Direct File Ready") else "$totalVariants Streams Available",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 13.5.sp,
                                         color = Color.White
@@ -696,19 +781,19 @@ private fun BrowserScreenContent(
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0xFF00E5FF).copy(alpha = 0.2f))
+                                            .background(islandAccentColor.copy(alpha = 0.2f))
                                             .padding(horizontal = 5.dp, vertical = 1.dp)
                                     ) {
                                         Text(
                                             text = "READY",
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Black,
-                                            color = Color(0xFF00E5FF)
+                                            color = islandAccentColor
                                         )
                                     }
                                 }
                                 Text(
-                                    text = "Tap to configure formats & download",
+                                    text = if (isDirectFile) "Tap to configure download & start" else "Tap to configure formats & download",
                                     fontSize = 11.sp,
                                     color = Color(0xFF90A4AE)
                                 )
@@ -717,9 +802,28 @@ private fun BrowserScreenContent(
                             Icon(
                                 imageVector = Icons.Default.PlayArrow,
                                 contentDescription = null,
-                                tint = Color(0xFF00E5FF),
+                                tint = islandAccentColor,
                                 modifier = Modifier.size(16.dp)
                             )
+
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x33000000))
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        viewModel.dismissDetectedMedia()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Dismiss",
+                                    tint = Color(0xFF90A4AE),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -781,7 +885,7 @@ private fun BrowserScreenContent(
             DownloadConfigBottomSheet(
                 detectedMedia = uiState.detectedMediaState!!,
                 onDismiss = { viewModel.hideBottomSheet() },
-                onEnqueueDownload = { title, fileName, downloadUrl, pairedAudioUrl, mediaType, qualityLabel, codecLabel, threadCount, destinationFolder, totalBytes, sourcePageUrl ->
+                onEnqueueDownload = { title, fileName, downloadUrl, pairedAudioUrl, mediaType, qualityLabel, codecLabel, threadCount, destinationFolder, totalBytes, sourcePageUrl, formatId ->
                     scope.launch {
                         DownloadManager.getInstance(context).enqueueDownload(
                             title = title,
@@ -793,6 +897,7 @@ private fun BrowserScreenContent(
                             mediaType = mediaType,
                             qualityLabel = qualityLabel,
                             codecLabel = codecLabel,
+                            formatId = formatId,
                             threadCount = threadCount,
                             totalBytes = totalBytes
                         )
@@ -822,6 +927,8 @@ fun AppleOmnibar(
     uiState: BrowserUiState,
     appSettingsAdBlocker: Boolean,
     onAdBlockerToggle: () -> Unit,
+    appSettingsDnsFilter: Boolean,
+    onDnsFilterToggle: () -> Unit,
     onUrlChanged: (String) -> Unit,
     onGo: () -> Unit,
     onClear: () -> Unit,
@@ -837,12 +944,16 @@ fun AppleOmnibar(
     onToggleDesktopMode: () -> Unit,
     onToggleJavaScript: () -> Unit,
     onShare: () -> Unit,
-    onReload: () -> Unit
+    onReload: () -> Unit,
+    onManualSniff: () -> Unit = {}
 ) {
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF071118))
+            .background(if (isDark) Color(0xFF071118) else MaterialTheme.colorScheme.surface)
+            .statusBarsPadding()
     ) {
         // Incognito Banner
         AnimatedVisibility(
@@ -892,43 +1003,62 @@ fun AppleOmnibar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (uiState.currentLoadedUrl != null) {
+            val omnibarEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+            AnimatedVisibility(
+                visible = uiState.currentLoadedUrl != null,
+                enter = fadeIn(tween(180, easing = omnibarEasing)) + expandHorizontally(tween(180, easing = omnibarEasing)),
+                exit = fadeOut(tween(120, easing = FastOutLinearInEasing)) + shrinkHorizontally(tween(180, easing = omnibarEasing))
+            ) {
                 // Back Button (with Long Press for Home)
                 AnimatedIconButton(
                     onClick = onBack,
                     onLongClick = onHome,
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back (Hold for Home)",
-                    tint = if (uiState.isIncognito) Color(0xFFCFBCFF) else Color(0xFF00E5FF)
-                )
-
-                // Dedicated Home Button
-                AnimatedIconButton(
-                    onClick = onHome,
-                    icon = Icons.Default.Home,
-                    contentDescription = "Home",
-                    tint = Color(0xFF90A4AE)
-                )
-            } else {
-                // Home indicator on dashboard
-                AnimatedIconButton(
-                    onClick = onHome,
-                    icon = Icons.Default.Home,
-                    contentDescription = "Home",
-                    tint = if (uiState.isIncognito) Color(0xFFCFBCFF) else Color(0xFF00E5FF)
+                    tint = if (uiState.isIncognito) Color(0xFFCFBCFF) else (if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary)
                 )
             }
 
+            // Dedicated Home Button
+            AnimatedIconButton(
+                onClick = onHome,
+                icon = Icons.Default.Home,
+                contentDescription = "Home",
+                tint = if (uiState.currentLoadedUrl != null) MaterialTheme.colorScheme.onSurfaceVariant else (if (uiState.isIncognito) Color(0xFFCFBCFF) else (if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary))
+            )
+
+            var isEditingUrl by remember(uiState.currentLoadedUrl) { mutableStateOf(false) }
+
+            val displayHost = remember(uiState.currentLoadedUrl) {
+                uiState.currentLoadedUrl?.let { url ->
+                    try {
+                        val uri = java.net.URI(url)
+                        val host = uri.host?.removePrefix("www.")
+                        if (!host.isNullOrBlank()) host else url
+                    } catch (_: Exception) {
+                        url
+                    }
+                }
+            }
+
             // Capsule Omnibar Field
+            val omnibarBg = if (isDark) Color(0xFF0D1B26) else MaterialTheme.colorScheme.surfaceContainerHigh
+            val omnibarBorder = if (uiState.isIncognito) {
+                Color(0xFF8B5CF6).copy(alpha = 0.5f)
+            } else {
+                if (isDark) Color(0xFF142B39) else MaterialTheme.colorScheme.outlineVariant
+            }
+            val engineBtnBg = if (isDark) Color(0xFF07121A) else MaterialTheme.colorScheme.surfaceContainerHighest
+
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .height(44.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF0D1B26))
+                    .background(omnibarBg)
                     .border(
                         width = 1.dp,
-                        color = if (uiState.isIncognito) Color(0xFF8B5CF6).copy(alpha = 0.5f) else Color(0xFF142B39),
+                        color = omnibarBorder,
                         shape = CircleShape
                     )
                     .padding(horizontal = 12.dp),
@@ -943,14 +1073,14 @@ fun AppleOmnibar(
                         modifier = Modifier
                             .size(28.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF07121A))
+                            .background(engineBtnBg)
                             .clickable { onOpenSearchEngineDialog() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = if (uiState.currentLoadedUrl != null) Icons.Default.Lock else Icons.Default.Search,
                             contentDescription = "Search Engine: ${uiState.selectedSearchEngine.displayName}",
-                            tint = if (uiState.isIncognito) Color(0xFFCFBCFF) else Color(0xFF00E5FF),
+                            tint = if (uiState.isIncognito) Color(0xFFCFBCFF) else (if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary),
                             modifier = Modifier.size(15.dp)
                         )
                     }
@@ -958,35 +1088,60 @@ fun AppleOmnibar(
                     Spacer(modifier = Modifier.width(8.dp))
 
                     Box(modifier = Modifier.weight(1f)) {
-                        if (uiState.urlInput.isEmpty()) {
-                            Text(
-                                text = uiState.selectedSearchEngine.hint,
-                                color = Color(0xFF6B8092),
-                                fontSize = 13.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        if (uiState.currentLoadedUrl != null && !isEditingUrl) {
+                            // Clean Safari/Arc style domain view
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { isEditingUrl = true }
+                            ) {
+                                Text(
+                                    text = displayHost ?: "",
+                                    style = TextStyle(
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        } else {
+                            if (uiState.urlInput.isEmpty()) {
+                                Text(
+                                    text = uiState.selectedSearchEngine.hint,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            BasicTextField(
+                                value = uiState.urlInput,
+                                onValueChange = onUrlChanged,
+                                singleLine = true,
+                                textStyle = TextStyle(
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Normal
+                                ),
+                                cursorBrush = SolidColor(if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                                keyboardActions = KeyboardActions(onGo = {
+                                    isEditingUrl = false
+                                    onGo()
+                                }),
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
-
-                        BasicTextField(
-                            value = uiState.urlInput,
-                            onValueChange = onUrlChanged,
-                            singleLine = true,
-                            textStyle = TextStyle(
-                                color = Color.White,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Normal
-                            ),
-                            cursorBrush = SolidColor(Color(0xFF00E5FF)),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                            keyboardActions = KeyboardActions(onGo = { onGo() }),
-                            modifier = Modifier.fillMaxWidth()
-                        )
                     }
 
                     // Clear button animated
                     AnimatedVisibility(
-                        visible = uiState.urlInput.isNotEmpty(),
+                        visible = (uiState.currentLoadedUrl == null || isEditingUrl) && uiState.urlInput.isNotEmpty(),
                         enter = fadeIn() + scaleIn(),
                         exit = fadeOut() + scaleOut()
                     ) {
@@ -1005,12 +1160,65 @@ fun AppleOmnibar(
                 }
             }
 
-            // Ad-Block Shield Pill
-            AdBlockShieldPill(
-                isEnabled = appSettingsAdBlocker,
-                blockedCount = uiState.blockedAdsCount,
-                onClick = onAdBlockerToggle
-            )
+            // Sniffer / Media Detector Action Pill
+            if (uiState.currentLoadedUrl != null) {
+                val mediaState = uiState.detectedMediaState
+                val isDirect = mediaState?.isDirectFile == true || (mediaState != null && mediaState.videoVariants.isEmpty() && mediaState.audioVariants.isEmpty())
+                val totalStreamCount = if (isDirect) 1 else ((mediaState?.videoVariants?.size ?: 0) + (mediaState?.audioVariants?.size ?: 0))
+                val hasStreams = totalStreamCount > 0
+                val streamCount = totalStreamCount
+                val isExtracting = uiState.isExtractingMedia
+                val pillColor = if (isDirect) Color(0xFF00E676) else Color(0xFF00E5FF)
+
+                Box(
+                    modifier = Modifier
+                        .height(34.dp)
+                        .clip(CircleShape)
+                        .background(
+                            when {
+                                hasStreams -> pillColor
+                                isExtracting -> Color(0xFF004D59)
+                                else -> Color(0xFF0D1B26)
+                            }
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (hasStreams) pillColor else Color(0xFF142B39),
+                            shape = CircleShape
+                        )
+                        .clickable { onManualSniff() }
+                        .padding(horizontal = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (isExtracting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(13.dp),
+                                strokeWidth = 1.8.dp,
+                                color = Color(0xFF00E5FF)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = if (hasStreams) "Streams Ready" else "Sniff Media Streams",
+                                tint = if (hasStreams) Color(0xFF001F24) else Color(0xFF00E5FF),
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                        if (hasStreams) {
+                            Text(
+                                text = "$streamCount",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF001F24)
+                            )
+                        }
+                    }
+                }
+            }
 
             // Tab Switcher Pill Button
             TabCountButton(
@@ -1036,7 +1244,7 @@ fun AppleOmnibar(
                         .border(1.dp, Color(0xFF142B39), RoundedCornerShape(16.dp))
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Home / Dashboard", color = Color.White) },
+                        text = { Text("Start Page", color = Color.White) },
                         leadingIcon = { Icon(Icons.Default.Home, contentDescription = null, tint = Color(0xFF00E5FF)) },
                         onClick = {
                             onHome()
@@ -1044,6 +1252,29 @@ fun AppleOmnibar(
                         }
                     )
                     if (uiState.currentLoadedUrl != null) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    when {
+                                        uiState.isExtractingMedia -> "Sniffing streams..."
+                                        uiState.detectedMediaState != null -> "Detected Streams (${uiState.detectedMediaState.videoVariants.size})"
+                                        else -> "Sniff Media on Page"
+                                    },
+                                    color = Color.White
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Download,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00E5FF)
+                                )
+                            },
+                            onClick = {
+                                onManualSniff()
+                                onDismissMenu()
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("Pin to Favourite", color = Color.White) },
                             leadingIcon = { Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFF00E5FF)) },
@@ -1053,6 +1284,81 @@ fun AppleOmnibar(
                             }
                         )
                     }
+                    HorizontalDivider(color = Color(0xFF142B39))
+
+                    // Brave Shields (Ad-Blocker) Toggle Item
+                    DropdownMenuItem(
+                        text = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f, fill = false)) {
+                                    Text("Brave Shields", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        text = if (appSettingsAdBlocker) "${uiState.blockedAdsCount} blocked" else "Shields Off",
+                                        fontSize = 11.sp,
+                                        color = if (appSettingsAdBlocker) Color(0xFF00E5FF) else Color(0xFF78909C)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Switch(
+                                    checked = appSettingsAdBlocker,
+                                    onCheckedChange = { onAdBlockerToggle() },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color(0xFF00E5FF),
+                                        checkedTrackColor = Color(0xFF004D59)
+                                    )
+                                )
+                            }
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = if (appSettingsAdBlocker) Color(0xFF00E5FF) else Color(0xFF78909C)
+                            )
+                        },
+                        onClick = onAdBlockerToggle
+                    )
+
+                    // DNS & Tracker Filter Toggle Item
+                    DropdownMenuItem(
+                        text = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f, fill = false)) {
+                                    Text("DNS Filter", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        text = if (appSettingsDnsFilter) "Active • Real-time" else "DNS Filter Off",
+                                        fontSize = 11.sp,
+                                        color = if (appSettingsDnsFilter) Color(0xFF10B981) else Color(0xFF78909C)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Switch(
+                                    checked = appSettingsDnsFilter,
+                                    onCheckedChange = { onDnsFilterToggle() },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color(0xFF10B981),
+                                        checkedTrackColor = Color(0xFF053E2E)
+                                    )
+                                )
+                            }
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Security,
+                                contentDescription = null,
+                                tint = if (appSettingsDnsFilter) Color(0xFF10B981) else Color(0xFF78909C)
+                            )
+                        },
+                        onClick = onDnsFilterToggle
+                    )
                     HorizontalDivider(color = Color(0xFF142B39))
                     DropdownMenuItem(
                         text = { Text("New Tab", color = Color.White) },
@@ -1129,7 +1435,12 @@ fun AppleOmnibar(
             }
         }
 
-        // Sleek Gradient Progress Indicator
+        // Sleek Gradient Progress Indicator with fluid width animation
+        val animatedProgress by animateFloatAsState(
+            targetValue = if (uiState.isLoading) (uiState.progress / 100f).coerceIn(0.08f, 1f) else 0f,
+            animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing),
+            label = "PageLoadProgress"
+        )
         if (uiState.isLoading) {
             Box(
                 modifier = Modifier
@@ -1139,7 +1450,7 @@ fun AppleOmnibar(
             ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(uiState.progress / 100f)
+                        .fillMaxWidth(animatedProgress)
                         .height(2.5.dp)
                         .background(
                             Brush.horizontalGradient(
@@ -1169,7 +1480,11 @@ fun AnimatedIconButton(
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
         targetValue = if (isPressed) 0.88f else 1.0f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+        animationSpec = if (isPressed) {
+            tween(durationMillis = 80, easing = LinearOutSlowInEasing)
+        } else {
+            spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow)
+        },
         label = "ButtonScale"
     )
 
@@ -1259,8 +1574,8 @@ fun TabCountButton(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.90f else 1.0f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+        targetValue = if (isPressed) 0.94f else 1.0f,
+        animationSpec = tween(durationMillis = 100, easing = LinearOutSlowInEasing),
         label = "TabScale"
     )
 
@@ -1291,7 +1606,7 @@ fun TabCountButton(
 }
 
 /**
- * World-Class Redesigned Browser Home Dashboard.
+ * Modern, Ultra-Clean Apple & Cyberpunk Redesigned Browser Home Dashboard.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1308,24 +1623,28 @@ fun BrowserHomeDashboard(
     val scrollState = rememberScrollState()
     val clipboardManager = LocalClipboardManager.current
     val haptic = LocalHapticFeedback.current
-    var directLinkInput by remember { mutableStateOf("") }
+    var searchInput by remember { mutableStateOf("") }
+
+    val clipText = clipboardManager.getText()?.text
+    val hasClipboardUrl = !clipText.isNullOrBlank() && 
+        (clipText.startsWith("http://", ignoreCase = true) || clipText.startsWith("https://", ignoreCase = true))
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        // Hero Brand Header
+        // 1. Incognito Isolation Banner
         if (isIncognito) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(18.dp))
                     .background(Color(0x228B5CF6))
-                    .border(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                    .padding(14.dp)
+                    .border(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f), RoundedCornerShape(18.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -1335,10 +1654,10 @@ fun BrowserHomeDashboard(
                         imageVector = Icons.Default.VpnLock,
                         contentDescription = null,
                         tint = Color(0xFFCFBCFF),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = "Incognito Tab • History, cookies & caches will be discarded on tab close.",
+                        text = "Incognito Tab • History, cookies & caches discarded on close",
                         fontSize = 12.sp,
                         color = Color(0xFFCFBCFF),
                         fontWeight = FontWeight.Medium
@@ -1347,53 +1666,60 @@ fun BrowserHomeDashboard(
             }
         }
 
-        // 2. Refined Typographic Header with Quick Search Engine Switcher
-        Row(
+        // 2. Hero Brand Header & Search Engine Picker
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(top = 10.dp, bottom = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column {
-                Text(
-                    text = "Start Page",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-                Text(
-                    text = "Fast media sniffer & ad-free streaming",
-                    fontSize = 12.sp,
-                    color = Color(0xFF78909C)
+            // Glowing Cyberpunk Emblem
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(
+                                Color(0x3300E5FF),
+                                Color(0x0500E5FF)
+                            )
+                        )
+                    )
+                    .border(1.5.dp, Color(0xFF00E5FF).copy(alpha = 0.6f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Bolt,
+                    contentDescription = "UDM Browser",
+                    tint = Color(0xFF00E5FF),
+                    modifier = Modifier.size(28.dp)
                 )
             }
 
-            // Sleek Search Engine Quick-Switch Pill
-            val engineInteraction = remember { MutableInteractionSource() }
-            val isEnginePressed by engineInteraction.collectIsPressedAsState()
-            val engineScale by animateFloatAsState(
-                targetValue = if (isEnginePressed) 0.92f else 1.0f,
-                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-                label = "EngineScale"
+            Text(
+                text = "Universal Browser",
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 22.sp,
+                    letterSpacing = (-0.3).sp
+                ),
+                color = Color.White
             )
 
-            Box(
-                modifier = Modifier
-                    .graphicsLayer {
-                        scaleX = engineScale
-                        scaleY = engineScale
-                    }
-                    .clip(CircleShape)
-                    .background(Color(0xFF091622))
-                    .border(1.dp, Color(0xFF142B39), CircleShape)
-                    .clickable(interactionSource = engineInteraction, indication = null) {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onSearchEngineClick()
-                    }
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            // Switch Search Engine Chip
+            Surface(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onSearchEngineClick()
+                },
+                shape = CircleShape,
+                color = Color(0xFF081520),
+                border = BorderStroke(1.dp, Color(0xFF152F42))
             ) {
                 Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -1401,24 +1727,29 @@ fun BrowserHomeDashboard(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
                         tint = Color(0xFF00E5FF),
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(13.dp)
                     )
                     Text(
                         text = selectedSearchEngine.displayName,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFCFDCE5)
+                    )
+                    Text(
+                        text = "▾",
+                        fontSize = 11.sp,
+                        color = Color(0xFF718C9E)
                     )
                 }
             }
         }
 
-        // 3. Apple-Grade Quick Stream Sniffer & Paste Hub
+        // 3. Prominent Search & Sniffer Input Capsule
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(22.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF08141E)),
-            border = BorderStroke(1.dp, Color(0xFF132B39))
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF07131D)),
+            border = BorderStroke(1.dp, Color(0xFF142B39))
         ) {
             Column(
                 modifier = Modifier
@@ -1427,85 +1758,28 @@ fun BrowserHomeDashboard(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF00E5FF).copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Bolt,
-                                contentDescription = null,
-                                tint = Color(0xFF00E5FF),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                        Text(
-                            text = "Stream Sniffer & Downloader",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.5.sp,
-                            color = Color.White
-                        )
-                    }
-
-                    // Quick Paste chip from clipboard
-                    val clipText = clipboardManager.getText()?.text
-                    if (!clipText.isNullOrBlank() && (clipText.startsWith("http://") || clipText.startsWith("https://"))) {
-                        Box(
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(Color(0x3300E5FF))
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    directLinkInput = clipText
-                                }
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentPaste,
-                                    contentDescription = null,
-                                    tint = Color(0xFF00E5FF),
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Paste Link",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00E5FF)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Input + Sniff Capsule Row
-                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF050E15))
-                        .border(1.dp, Color(0xFF163246), RoundedCornerShape(16.dp))
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF040A0F))
+                        .border(1.dp, Color(0xFF142C3D), RoundedCornerShape(14.dp))
                         .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        tint = Color(0xFF6B8092),
+                        modifier = Modifier.size(18.dp)
+                    )
+
                     Box(modifier = Modifier.weight(1f)) {
-                        if (directLinkInput.isEmpty()) {
+                        if (searchInput.isEmpty()) {
                             Text(
-                                text = "Paste video, audio, or web URL...",
-                                color = Color(0xFF6B8092),
+                                text = "Search ${selectedSearchEngine.displayName} or enter URL...",
+                                color = Color(0xFF5E7385),
                                 fontSize = 13.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1513,8 +1787,8 @@ fun BrowserHomeDashboard(
                         }
 
                         BasicTextField(
-                            value = directLinkInput,
-                            onValueChange = { directLinkInput = it },
+                            value = searchInput,
+                            onValueChange = { searchInput = it },
                             singleLine = true,
                             textStyle = TextStyle(
                                 color = Color.White,
@@ -1524,78 +1798,110 @@ fun BrowserHomeDashboard(
                             cursorBrush = SolidColor(Color(0xFF00E5FF)),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                             keyboardActions = KeyboardActions(onGo = {
-                                if (directLinkInput.isNotBlank()) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onPasteAndDownload(directLinkInput)
+                                if (searchInput.isNotBlank()) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onBookmarkClicked(searchInput.trim())
                                 }
                             }),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
 
-                    if (directLinkInput.isNotEmpty()) {
+                    if (searchInput.isNotEmpty()) {
                         IconButton(
-                            onClick = { directLinkInput = "" },
-                            modifier = Modifier.size(24.dp)
+                            onClick = { searchInput = "" },
+                            modifier = Modifier.size(22.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Clear,
                                 contentDescription = "Clear",
-                                tint = Color(0xFF90A4AE),
+                                tint = Color(0xFF889DA8),
                                 modifier = Modifier.size(14.dp)
                             )
                         }
                     }
 
-                    // Sniff Action Pill
-                    val sniffInteraction = remember { MutableInteractionSource() }
-                    val isSniffPressed by sniffInteraction.collectIsPressedAsState()
-                    val sniffScale by animateFloatAsState(
-                        targetValue = if (isSniffPressed) 0.90f else 1.0f,
-                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-                        label = "SniffScale"
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .graphicsLayer {
-                                scaleX = sniffScale
-                                scaleY = sniffScale
+                    // Go / Sniff Action Button
+                    Surface(
+                        onClick = {
+                            if (searchInput.isNotBlank()) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onBookmarkClicked(searchInput.trim())
                             }
-                            .height(36.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(
-                                        Color(0xFF00E5FF),
-                                        Color(0xFF0091EA)
-                                    )
-                                )
-                            )
-                            .clickable(interactionSource = sniffInteraction, indication = null) {
-                                if (directLinkInput.isNotBlank()) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onPasteAndDownload(directLinkInput)
-                                }
-                            }
-                            .padding(horizontal = 14.dp),
-                        contentAlignment = Alignment.Center
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF00E5FF),
+                        contentColor = Color(0xFF001F24)
                     ) {
                         Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Bolt,
                                 contentDescription = null,
-                                tint = Color(0xFF001F24),
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(13.dp)
                             )
                             Text(
-                                text = "Sniff",
+                                text = "Go",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
+
+                // Smart Clipboard Detection Pill
+                if (hasClipboardUrl && searchInput.isEmpty()) {
+                    Surface(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onPasteAndDownload(clipText!!)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF00E5FF).copy(alpha = 0.08f),
+                        border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentPaste,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00E5FF),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = "Link detected in clipboard",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF00E5FF)
+                                    )
+                                    Text(
+                                        text = clipText!!,
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF8BA2B4),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = "Sniff & Open",
+                                fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.5.sp,
-                                color = Color(0xFF001F24)
+                                color = Color(0xFF00E5FF)
                             )
                         }
                     }
@@ -1603,8 +1909,8 @@ fun BrowserHomeDashboard(
             }
         }
 
-        // Favourite Section (User Customized Speed-Dial Portals)
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // 4. Speed Dial / Favourites Section (4-column grid + Add button)
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1617,7 +1923,7 @@ fun BrowserHomeDashboard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "Favourite",
+                        text = "Speed Dial",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
@@ -1638,43 +1944,29 @@ fun BrowserHomeDashboard(
                     }
                 }
 
-                // Pin Site pill button
-                val pinInteraction = remember { MutableInteractionSource() }
-                val isPinPressed by pinInteraction.collectIsPressedAsState()
-                val pinScale by animateFloatAsState(
-                    targetValue = if (isPinPressed) 0.92f else 1.0f,
-                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-                    label = "PinScale"
-                )
-
-                Box(
-                    modifier = Modifier
-                        .graphicsLayer {
-                            scaleX = pinScale
-                            scaleY = pinScale
-                        }
-                        .clip(CircleShape)
-                        .background(Color(0xFF00E5FF).copy(alpha = 0.12f))
-                        .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.45f), CircleShape)
-                        .clickable(interactionSource = pinInteraction, indication = null) {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onPinSiteClick()
-                        }
-                        .padding(horizontal = 12.dp, vertical = 5.dp)
+                Surface(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onPinSiteClick()
+                    },
+                    shape = CircleShape,
+                    color = Color(0xFF00E5FF).copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.4f))
                 ) {
                     Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Add,
-                            contentDescription = "Pin Site",
+                            contentDescription = "Add",
                             tint = Color(0xFF00E5FF),
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(13.dp)
                         )
                         Text(
-                            text = "Pin Site",
-                            fontSize = 11.5.sp,
+                            text = "Add Portal",
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF00E5FF)
                         )
@@ -1682,105 +1974,52 @@ fun BrowserHomeDashboard(
                 }
             }
 
-            if (favourites.isEmpty()) {
-                // Empty state card
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onPinSiteClick() },
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF091622)),
-                    border = BorderStroke(1.dp, Color(0xFF142B39))
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = null,
-                            tint = Color(0xFF00E5FF),
-                            modifier = Modifier.size(36.dp)
-                        )
-                        Text(
-                            text = "No favourite sites pinned yet",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.5.sp,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "Tap here to pin your favourite streaming portals & websites",
-                            fontSize = 11.5.sp,
-                            color = Color(0xFF889DA8)
-                        )
-                    }
-                }
-            } else {
-                // Responsive grid: 3 columns
-                val rowCount = (favourites.size + 2) / 3
-                val gridHeight = (rowCount * 115).dp
+            // 4-column flow layout
+            val allItems = favourites
+            val rows = (allItems.size + 1 + 3) / 4 // +1 for the Add card
 
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(gridHeight),
-                    userScrollEnabled = false,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+            for (rowIndex in 0 until rows) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(favourites, key = { it.id }) { site ->
-                        val siteInteraction = remember { MutableInteractionSource() }
-                        val isSitePressed by siteInteraction.collectIsPressedAsState()
-                        val siteScale by animateFloatAsState(
-                            targetValue = if (isSitePressed) 0.90f else 1.0f,
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-                            label = "SiteScale"
-                        )
-                        val accentColor = remember(site.colorHex) { parseHexColor(site.colorHex) }
-                        val siteIcon = remember(site.url) { getFavouriteIcon(site.url) }
+                    for (colIndex in 0 until 4) {
+                        val itemIndex = rowIndex * 4 + colIndex
+                        if (itemIndex < allItems.size) {
+                            val site = allItems[itemIndex]
+                            val accentColor = remember(site.colorHex) { parseHexColor(site.colorHex) }
+                            val siteIcon = remember(site.url) { getFavouriteIcon(site.url) }
 
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .graphicsLayer {
-                                    scaleX = siteScale
-                                    scaleY = siteScale
-                                }
-                                .clip(RoundedCornerShape(18.dp))
-                                .combinedClickable(
-                                    interactionSource = siteInteraction,
-                                    indication = null,
-                                    onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onBookmarkClicked(site.url)
-                                    },
-                                    onLongClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onRemoveFavourite(site)
-                                    }
-                                ),
-                            shape = RoundedCornerShape(18.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF091622)),
-                            border = BorderStroke(1.dp, Color(0xFF142B39))
-                        ) {
-                            Box(modifier = Modifier.fillMaxWidth()) {
+                            Card(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .combinedClickable(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            onBookmarkClicked(site.url)
+                                        },
+                                        onLongClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onRemoveFavourite(site)
+                                        }
+                                    ),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF08141F)),
+                                border = BorderStroke(1.dp, Color(0xFF132838))
+                            ) {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 10.dp, vertical = 12.dp),
+                                        .padding(vertical = 12.dp, horizontal = 6.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(38.dp)
+                                            .size(42.dp)
                                             .clip(CircleShape)
                                             .background(accentColor.copy(alpha = 0.15f))
-                                            .border(1.dp, accentColor.copy(alpha = 0.4f), CircleShape),
+                                            .border(1.dp, accentColor.copy(alpha = 0.45f), CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
@@ -1792,7 +2031,7 @@ fun BrowserHomeDashboard(
                                     }
                                     Text(
                                         text = site.title,
-                                        fontSize = 12.sp,
+                                        fontSize = 11.5.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color.White,
                                         maxLines = 1,
@@ -1800,93 +2039,148 @@ fun BrowserHomeDashboard(
                                     )
                                     Text(
                                         text = site.badge,
-                                        fontSize = 9.sp,
+                                        fontSize = 8.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF00E5FF),
+                                        color = Color(0xFF00E5FF).copy(alpha = 0.85f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-
-                                // Quick Delete button in corner
-                                Box(
+                            }
+                        } else if (itemIndex == allItems.size) {
+                            // Add Site Tile
+                            Card(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onPinSiteClick()
+                                    },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF050E16)),
+                                border = BorderStroke(1.dp, Color(0xFF152A38))
+                            ) {
+                                Column(
                                     modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(4.dp)
-                                        .size(22.dp)
-                                        .clip(CircleShape)
-                                        .clickable {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            onRemoveFavourite(site)
-                                        },
-                                    contentAlignment = Alignment.Center
+                                        .fillMaxWidth()
+                                        .padding(vertical = 12.dp, horizontal = 6.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Remove",
-                                        tint = Color(0xFF546E7A),
-                                        modifier = Modifier.size(12.dp)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF0F2536))
+                                            .border(1.dp, Color(0xFF1E435E), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Add Portal",
+                                            tint = Color(0xFF00E5FF),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = "Add",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF8BA2B4),
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "Custom",
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF5D7586),
+                                        maxLines = 1
                                     )
                                 }
                             }
+                        } else {
+                            // Blank spacer to preserve 4-column alignment
+                            Spacer(modifier = Modifier.weight(1f))
                         }
                     }
                 }
             }
         }
 
-        // Privacy & Ad-Block Status Card
+        // 5. Engine Telemetry & Protection Strip
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF08141E)),
-            border = BorderStroke(1.dp, Color(0xFF132B39))
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF061019)),
+            border = BorderStroke(1.dp, Color(0xFF0E2333))
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF003847))
-                        .border(1.dp, Color(0xFF00E5FF), CircleShape),
-                    contentAlignment = Alignment.Center
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Shield,
                         contentDescription = null,
                         tint = Color(0xFF00E5FF),
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "Engine Shields & Protocol Telemetry",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFCFDCE5)
                     )
                 }
 
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Brave Shields & DNS Filter",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.5.sp,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF10B981))
-                        )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf(
+                        Triple(Icons.Default.Bolt, "Sniffer", "4K HLS / MP4"),
+                        Triple(Icons.Default.Security, "Shields", "AdBlock ON"),
+                        Triple(Icons.Default.Speed, "Turbo", "16x Sockets")
+                    ).forEach { (icon, title, desc) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF00E5FF).copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00E5FF),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = title,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = desc,
+                                    fontSize = 9.5.sp,
+                                    color = Color(0xFF70899B)
+                                )
+                            }
+                        }
                     }
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "In-memory request filtering blocks intrusive trackers & pop-up spam in real-time.",
-                        fontSize = 11.5.sp,
-                        color = Color(0xFF78909C)
-                    )
                 }
             }
         }
