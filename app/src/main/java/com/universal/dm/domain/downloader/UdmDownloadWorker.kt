@@ -240,6 +240,15 @@ class UdmDownloadWorker(
             )
             downloadDao.updateTask(updatedTask)
 
+            val prefs = applicationContext.getSharedPreferences("udm_app_settings", Context.MODE_PRIVATE)
+            val soundEnabled = prefs.getBoolean("key_sound_completion", true)
+            DownloadEngineHelper.notifyDownloadCompleted(
+                context = applicationContext,
+                notificationId = taskId.hashCode(),
+                title = finalFileName,
+                soundEnabled = soundEnabled
+            )
+
             Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "Download failed for task $taskId", e)

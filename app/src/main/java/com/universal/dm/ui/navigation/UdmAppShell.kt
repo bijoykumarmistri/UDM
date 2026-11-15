@@ -2,21 +2,13 @@ package com.universal.dm.ui.navigation
 
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.PredictiveBackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -51,19 +43,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.universal.dm.UdmApplication
 import com.universal.dm.data.local.DownloadTaskEntity
 import com.universal.dm.ui.browser.BrowserScreen
 import com.universal.dm.ui.downloads.DownloadsScreen
 import com.universal.dm.ui.settings.LocalAppSettings
 import com.universal.dm.ui.settings.SettingsScreen
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -72,7 +69,8 @@ import kotlin.coroutines.cancellation.CancellationException
  *
  * Implements:
  * - Apple-grade floating pill bottom navigation dock ([UdmBottomNav]).
- * - Fluid, physics-based page transitions between [Browser, Download, Finished, Settings].
+ * - Fluid, hardware-accelerated spatial page transitions between [Browser, Downloads, Settings].
+ * - Visited screen retention for instantaneous zero-latency page switching and state preservation.
  * - Full Android 16, 17 Predictive Back gesture transition animation with scale, offset & corner morphing.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,11 +80,15 @@ fun UdmAppShell(
     initialSharedUrl: String? = null,
     onSharedUrlHandled: () -> Unit = {}
 ) {
-    val settings = LocalAppSettings.current
     val context = LocalContext.current
 
     var currentScreen by rememberSaveable { mutableStateOf(Screen.Downloads) }
     val backStack = remember { mutableStateListOf(Screen.Downloads) }
+    var slideDirection by remember { mutableIntStateOf(1) } // 1: forward, -1: backward
+
+    // Start ONLY with currentScreen so cold start renders Frame 0 instantly.
+    // Inactive tabs are composed on-demand when first visited, then retained for zero-latency switching.
+    val visitedScreens = remember { mutableStateListOf(currentScreen) }
 
     // Android 16 & 17 Predictive Back Gesture Animation State
     var backProgress by remember { mutableFloatStateOf(0f) }
@@ -103,7 +105,12 @@ fun UdmAppShell(
             // Gesture successfully completed -> pop backstack
             if (backStack.size > 1) {
                 backStack.removeAt(backStack.lastIndex)
-                currentScreen = backStack.last()
+                val target = backStack.last()
+                if (!visitedScreens.contains(target)) {
+                    visitedScreens.add(target)
+                }
+                slideDirection = if (target.ordinal > currentScreen.ordinal) 1 else -1
+                currentScreen = target
             }
         } catch (_: CancellationException) {
             // User cancelled swipe gesture -> spring back smoothly
@@ -115,6 +122,10 @@ fun UdmAppShell(
     // Function to navigate to a new screen and update backstack
     fun navigateTo(screen: Screen) {
         if (currentScreen != screen) {
+            if (!visitedScreens.contains(screen)) {
+                visitedScreens.add(screen)
+            }
+            slideDirection = if (screen.ordinal > currentScreen.ordinal) 1 else -1
             currentScreen = screen
             if (backStack.lastOrNull() != screen) {
                 backStack.add(screen)
@@ -129,7 +140,7 @@ fun UdmAppShell(
         }
     }
 
-    // Dynamically observe active download tasks count from Room
+    // Dynamically observe active download tasks count from Room without triggering AppSettings writes
     val activeTasks by produceState(initialValue = emptyList<DownloadTaskEntity>(), context) {
         try {
             UdmApplication.getDatabase(context).downloadDao().getActiveTasksFlow().collect {
@@ -140,15 +151,10 @@ fun UdmAppShell(
         }
     }
 
-    val liveActiveCount = activeTasks.size
-    LaunchedEffect(liveActiveCount) {
-        settings.activeDownloadsCount = liveActiveCount
-    }
-
-    val displayBadgeCount = if (liveActiveCount > 0) liveActiveCount else settings.activeDownloadsCount
+    val displayBadgeCount = activeTasks.size
 
     // Predictive back gesture visual transformations (Android 16, 17 system animation)
-    val predictiveScale by animateFloatAsState(
+    val predictiveScaleState = animateFloatAsState(
         targetValue = if (backProgress > 0f) 1f - (backProgress * 0.08f) else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioLowBouncy,
@@ -161,7 +167,7 @@ fun UdmAppShell(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            // Floating Capsule Pill Dock matching reference design
+            // Floating Capsule Pill Dock with GPU-accelerated 120Hz sliding indicator
             UdmBottomNav(
                 currentScreen = currentScreen,
                 onScreenSelected = { targetScreen ->
@@ -180,8 +186,9 @@ fun UdmAppShell(
                     if (progress > 0f) {
                         val px = progress * 28.dp.toPx()
                         translationX = if (backSwipeEdge == BackEventCompat.EDGE_LEFT) px else -px
-                        scaleX = predictiveScale
-                        scaleY = predictiveScale
+                        val s = predictiveScaleState.value
+                        scaleX = s
+                        scaleY = s
                         shape = RoundedCornerShape(progress * 28.dp.toPx())
                         clip = true
                     } else {
@@ -192,58 +199,92 @@ fun UdmAppShell(
                     }
                 }
         ) {
-            // Bespoke Apple / Material 3 Fluid Spatial Transition
-            // Subtle 5% glide + 0.985f scale settle + crossfade for buttery 120Hz responsiveness
-            AnimatedContent(
-                targetState = currentScreen,
-                transitionSpec = {
-                    val isForward = targetState.ordinal > initialState.ordinal
-                    val slideOffsetPercent = 0.05f
-                    val enterEasing = CubicBezierEasing(0.15f, 1f, 0.3f, 1f)
-
-                    (fadeIn(
-                        animationSpec = tween(durationMillis = 240, easing = LinearOutSlowInEasing)
-                    ) + scaleIn(
-                        initialScale = 0.985f,
-                        animationSpec = tween(durationMillis = 240, easing = enterEasing)
-                    ) + slideInHorizontally(
-                        initialOffsetX = { (it * (if (isForward) slideOffsetPercent else -slideOffsetPercent)).toInt() },
-                        animationSpec = tween(durationMillis = 240, easing = enterEasing)
-                    )) togetherWith (fadeOut(
-                        animationSpec = tween(durationMillis = 140, easing = FastOutLinearInEasing)
-                    ) + slideOutHorizontally(
-                        targetOffsetX = { (it * (if (isForward) -slideOffsetPercent else slideOffsetPercent)).toInt() },
-                        animationSpec = tween(durationMillis = 160, easing = FastOutLinearInEasing)
-                    ))
-                },
-                label = "ScreenTransition"
-            ) { screen ->
-                if (LocalInspectionMode.current) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = "${screen.title} Preview Screen",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                } else {
-                    when (screen) {
-                        Screen.Browser -> BrowserScreen(
-                            sharedUrl = initialSharedUrl,
-                            onSharedUrlHandled = onSharedUrlHandled,
-                            onDownloadTriggered = { _, _ ->
-                                navigateTo(Screen.Downloads)
+            if (LocalInspectionMode.current) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "${currentScreen.title} Preview Screen",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                Screen.entries.forEach { screen ->
+                    if (visitedScreens.contains(screen)) {
+                        AnimatedScreenSlot(
+                            screen = screen,
+                            isSelected = currentScreen == screen,
+                            slideDirection = slideDirection
+                        ) {
+                            when (screen) {
+                                Screen.Browser -> BrowserScreen(
+                                    sharedUrl = initialSharedUrl,
+                                    onSharedUrlHandled = onSharedUrlHandled,
+                                    onDownloadTriggered = { _, _ ->
+                                        navigateTo(Screen.Downloads)
+                                    }
+                                )
+                                Screen.Downloads -> DownloadsScreen(
+                                    onNavigateToBrowser = { navigateTo(Screen.Browser) }
+                                )
+                                Screen.Settings -> SettingsScreen()
                             }
-                        )
-                        Screen.Downloads -> DownloadsScreen(
-                            onNavigateToBrowser = { navigateTo(Screen.Browser) }
-                        )
-                        Screen.Settings -> SettingsScreen()
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * Isolated Composable wrapper for each visited screen.
+ * Reads animation state strictly inside [graphicsLayer] and [drawWithContent] lambdas
+ * so that 200ms page transitions execute directly on the GPU without triggering CPU recompositions.
+ */
+@Composable
+private fun AnimatedScreenSlot(
+    screen: Screen,
+    isSelected: Boolean,
+    slideDirection: Int,
+    content: @Composable () -> Unit
+) {
+    val alphaAnimState = animateFloatAsState(
+        targetValue = if (isSelected) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = 200,
+            easing = FastOutSlowInEasing
+        ),
+        label = "ScreenAlpha_${screen.name}"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(if (isSelected) 1f else 0f)
+            .graphicsLayer {
+                val a = alphaAnimState.value
+                alpha = a
+                val offsetPx = 24.dp.toPx()
+                translationX = if (isSelected) {
+                    (1f - a) * offsetPx * slideDirection
+                } else {
+                    (1f - a) * -offsetPx * slideDirection
+                }
+            }
+            .drawWithContent {
+                if (isSelected || alphaAnimState.value > 0.005f) {
+                    drawContent()
+                }
+            }
+            .semantics {
+                if (!isSelected) {
+                    @Suppress("DEPRECATION")
+                    invisibleToUser()
+                }
+            }
+    ) {
+        content()
     }
 }
 

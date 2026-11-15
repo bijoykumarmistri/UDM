@@ -46,11 +46,23 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
                     _peakSpeed.value = currentTotalSpeed
                 }
 
-                val newMap = mutableMapOf<String, List<DownloadChunkEntity>>()
-                tasks.filter { it.status == DownloadStatus.DOWNLOADING || it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.PAUSED }.forEach { task ->
-                    newMap[task.id] = downloadDao.getChunksForTask(task.id)
+                val relevantTasks = tasks.filter {
+                    it.status == DownloadStatus.DOWNLOADING || it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.PAUSED
                 }
-                _chunksMap.value = newMap
+                if (relevantTasks.isNotEmpty() || _chunksMap.value.isNotEmpty()) {
+                    val newMap = mutableMapOf<String, List<DownloadChunkEntity>>()
+                    val previousMap = _chunksMap.value
+                    relevantTasks.forEach { task ->
+                        if (task.status == DownloadStatus.DOWNLOADING || !previousMap.containsKey(task.id)) {
+                            newMap[task.id] = downloadDao.getChunksForTask(task.id)
+                        } else {
+                            newMap[task.id] = previousMap[task.id] ?: emptyList()
+                        }
+                    }
+                    if (newMap != previousMap) {
+                        _chunksMap.value = newMap
+                    }
+                }
             }
         }
     }

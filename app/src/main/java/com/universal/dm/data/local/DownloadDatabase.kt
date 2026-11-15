@@ -11,7 +11,7 @@ import androidx.room.TypeConverters
         DownloadTaskEntity::class,
         DownloadChunkEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

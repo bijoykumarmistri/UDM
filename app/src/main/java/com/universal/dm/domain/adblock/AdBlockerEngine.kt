@@ -3,8 +3,11 @@ package com.universal.dm.domain.adblock
 import android.content.Context
 import android.net.Uri
 import android.webkit.WebResourceResponse
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.ByteArrayInputStream
-import java.io.InputStreamReader
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * UDM Brave Shields / AdGuard Ad & Tracker Blocker Engine
@@ -16,7 +19,7 @@ import java.io.InputStreamReader
  */
 class AdBlockerEngine private constructor(context: Context? = null) {
 
-    private val blockedHosts = HashSet<String>(600)
+    private val blockedHosts = ConcurrentHashMap.newKeySet<String>(600)
 
     private val blockedPathPatterns = listOf(
         "/api/stats/ads",
@@ -124,19 +127,21 @@ class AdBlockerEngine private constructor(context: Context? = null) {
         )
         blockedHosts.addAll(defaultHosts)
 
-        // Load comprehensive Brave Shields / AdGuard host list from assets
+        // Load comprehensive Brave Shields / AdGuard host list from assets asynchronously on IO dispatcher
         context?.let { ctx ->
-            try {
-                ctx.assets.open("adblock_hosts.txt").use { input ->
-                    InputStreamReader(input).forEachLine { line ->
-                        val trimmed = line.trim()
-                        if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
-                            blockedHosts.add(trimmed.lowercase())
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    ctx.assets.open("adblock_hosts.txt").bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            val trimmed = line.trim()
+                            if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
+                                blockedHosts.add(trimmed.lowercase())
+                            }
                         }
                     }
+                } catch (_: Exception) {
+                    // Fallback to defaultHosts if asset file read encounters an issue
                 }
-            } catch (_: Exception) {
-                // Fallback to defaultHosts if asset file read encounters an issue
             }
         }
     }

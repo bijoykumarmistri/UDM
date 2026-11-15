@@ -297,11 +297,6 @@ private fun BrowserScreenContent(
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     appSettings.updateAdBlocker(!appSettings.isAdBlockerEnabled)
                 },
-                appSettingsDnsFilter = appSettings.isDnsFilterEnabled,
-                onDnsFilterToggle = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    appSettings.updateDnsFilter(!appSettings.isDnsFilterEnabled)
-                },
                 onUrlChanged = { viewModel.onUrlInputChanged(it) },
                 onGo = { viewModel.loadUrl(uiState.urlInput) },
                 onClear = { viewModel.onUrlInputChanged("") },
@@ -507,8 +502,11 @@ private fun BrowserScreenContent(
                                     ) {
                                         return false
                                     }
+                                    if (appSettings.blockPopupsAndRedirects && request?.hasGesture() == false) {
+                                        return true
+                                    }
                                     return runCatching {
-                                        val intent = Intent(Intent.ACTION_VIEW, request.url).apply {
+                                        val intent = Intent(Intent.ACTION_VIEW, request?.url).apply {
                                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                         }
                                         ctx.startActivity(intent)
@@ -596,6 +594,9 @@ private fun BrowserScreenContent(
                                     isUserGesture: Boolean,
                                     resultMsg: android.os.Message?
                                 ): Boolean {
+                                    if (appSettings.blockPopupsAndRedirects && !isUserGesture) {
+                                        return false
+                                    }
                                     if (isUserGesture && resultMsg != null) {
                                         val transport = resultMsg.obj as? WebView.WebViewTransport
                                         val tempWebView = WebView(view?.context ?: return false).apply {
@@ -623,6 +624,8 @@ private fun BrowserScreenContent(
                     update = { webView ->
                         webView.settings.javaScriptEnabled = uiState.isJavaScriptEnabled
                         webView.settings.loadWithOverviewMode = uiState.isDesktopMode
+                        webView.settings.javaScriptCanOpenWindowsAutomatically = !appSettings.blockPopupsAndRedirects
+                        webView.settings.setSupportMultipleWindows(!appSettings.blockPopupsAndRedirects)
                         if (uiState.isDesktopMode) {
                             webView.settings.userAgentString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         } else {
@@ -927,8 +930,6 @@ fun AppleOmnibar(
     uiState: BrowserUiState,
     appSettingsAdBlocker: Boolean,
     onAdBlockerToggle: () -> Unit,
-    appSettingsDnsFilter: Boolean,
-    onDnsFilterToggle: () -> Unit,
     onUrlChanged: (String) -> Unit,
     onGo: () -> Unit,
     onClear: () -> Unit,
@@ -1323,42 +1324,6 @@ fun AppleOmnibar(
                         onClick = onAdBlockerToggle
                     )
 
-                    // DNS & Tracker Filter Toggle Item
-                    DropdownMenuItem(
-                        text = {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f, fill = false)) {
-                                    Text("DNS Filter", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                    Text(
-                                        text = if (appSettingsDnsFilter) "Active • Real-time" else "DNS Filter Off",
-                                        fontSize = 11.sp,
-                                        color = if (appSettingsDnsFilter) Color(0xFF10B981) else Color(0xFF78909C)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Switch(
-                                    checked = appSettingsDnsFilter,
-                                    onCheckedChange = { onDnsFilterToggle() },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color(0xFF10B981),
-                                        checkedTrackColor = Color(0xFF053E2E)
-                                    )
-                                )
-                            }
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.Security,
-                                contentDescription = null,
-                                tint = if (appSettingsDnsFilter) Color(0xFF10B981) else Color(0xFF78909C)
-                            )
-                        },
-                        onClick = onDnsFilterToggle
-                    )
                     HorizontalDivider(color = Color(0xFF142B39))
                     DropdownMenuItem(
                         text = { Text("New Tab", color = Color.White) },
@@ -1371,11 +1336,6 @@ fun AppleOmnibar(
                         onClick = onToggleIncognito
                     )
                     HorizontalDivider(color = Color(0xFF142B39))
-                    DropdownMenuItem(
-                        text = { Text("Search Engine: ${uiState.selectedSearchEngine.displayName}", color = Color.White) },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF00E5FF)) },
-                        onClick = onOpenSearchEngineDialog
-                    )
                     DropdownMenuItem(
                         text = {
                             Row(

@@ -1,12 +1,19 @@
 package com.universal.dm.data.local
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.universal.dm.data.model.DownloadStatus
 import com.universal.dm.data.model.MediaType
 import java.util.UUID
 
-@Entity(tableName = "download_tasks")
+@Entity(
+    tableName = "download_tasks",
+    indices = [
+        Index(value = ["status"]),
+        Index(value = ["createdAt"])
+    ]
+)
 data class DownloadTaskEntity(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),

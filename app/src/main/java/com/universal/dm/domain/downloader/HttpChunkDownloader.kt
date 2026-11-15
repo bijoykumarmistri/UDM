@@ -1,5 +1,6 @@
 package com.universal.dm.domain.downloader
 
+import com.universal.dm.core.NetworkClient
 import com.universal.dm.data.local.DownloadChunkEntity
 import com.universal.dm.data.local.DownloadDao
 import com.universal.dm.data.model.DownloadStatus
@@ -17,27 +18,11 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 class HttpChunkDownloader(
     private val downloadDao: DownloadDao,
-    private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .addInterceptor { chain ->
-            val original = chain.request()
-            val requestBuilder = original.newBuilder()
-            if (original.header("User-Agent") == null) {
-                requestBuilder.header(
-                    "User-Agent",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-                )
-            }
-            chain.proceed(requestBuilder.build())
-        }
-        .build()
+    private val okHttpClient: OkHttpClient = NetworkClient.client
 ) {
 
     suspend fun downloadDirectHttp(
@@ -193,7 +178,7 @@ class HttpChunkDownloader(
         }
         val body = response.body ?: throw IllegalStateException("Empty response body for chunk ${chunk.threadIndex}")
 
-        val buffer = ByteArray(32 * 1024)
+        val buffer = ByteArray(64 * 1024)
         var currentOffset = start
         var lastDbUpdateTime = System.currentTimeMillis()
 
@@ -247,7 +232,7 @@ class HttpChunkDownloader(
 
         val total = if (contentLength > 0) contentLength else body.contentLength()
         var downloaded = 0L
-        val buffer = ByteArray(32 * 1024)
+        val buffer = ByteArray(64 * 1024)
         var lastSampleTime = System.currentTimeMillis()
         var lastSampleBytes = 0L
 

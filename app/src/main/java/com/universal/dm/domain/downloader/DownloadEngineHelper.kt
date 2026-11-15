@@ -2,9 +2,12 @@ package com.universal.dm.domain.downloader
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -19,11 +22,15 @@ import java.util.Locale
 object DownloadEngineHelper {
 
     const val CHANNEL_ID = "udm_download_channel"
+    const val COMPLETION_CHANNEL_ID = "udm_completion_channel"
     private const val CHANNEL_NAME = "UDM Active Downloads"
+    private const val COMPLETION_CHANNEL_NAME = "UDM Completed Downloads"
 
     fun ensureNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            
+            val activeChannel = NotificationChannel(
                 CHANNEL_ID,
                 CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_LOW
@@ -31,8 +38,65 @@ object DownloadEngineHelper {
                 description = "Displays live multi-threaded download progress and speed"
                 setShowBadge(false)
             }
-            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(activeChannel)
+
+            val completionChannel = NotificationChannel(
+                COMPLETION_CHANNEL_ID,
+                COMPLETION_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Alerts and plays sound when file downloads finish"
+                enableVibration(true)
+                setShowBadge(true)
+            }
+            manager.createNotificationChannel(completionChannel)
+        }
+    }
+
+    fun notifyDownloadCompleted(
+        context: Context,
+        notificationId: Int,
+        title: String,
+        soundEnabled: Boolean = true
+    ) {
+        ensureNotificationChannel(context)
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        val intent = Intent(context, com.universal.dm.MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val soundUri = if (soundEnabled) {
+            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        } else null
+
+        val notification = NotificationCompat.Builder(context, COMPLETION_CHANNEL_ID)
+            .setContentTitle("Download Complete")
+            .setContentText(title)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .apply {
+                if (soundUri != null) {
+                    setSound(soundUri)
+                }
+            }
+            .build()
+
+        notificationManager.notify(notificationId, notification)
+
+        if (soundEnabled && soundUri != null) {
+            try {
+                val ringtone = RingtoneManager.getRingtone(context, soundUri)
+                ringtone?.play()
+            } catch (_: Exception) {}
         }
     }
 

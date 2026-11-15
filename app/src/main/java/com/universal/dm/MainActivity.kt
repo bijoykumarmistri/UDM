@@ -33,14 +33,18 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleIncomingIntent(intent)
-        requestAppPermissions()
 
         setContent {
             val appSettings = remember { AppSettingsState(this@MainActivity) }
             val sharedUrl by sharedUrlState
 
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                kotlinx.coroutines.delay(1200)
+                requestAppPermissions()
+            }
+
             CompositionLocalProvider(LocalAppSettings provides appSettings) {
-                UDMTheme {
+                UDMTheme(dynamicColor = appSettings.isDynamicColorEnabled) {
                     UdmAppShell(
                         initialSharedUrl = sharedUrl,
                         onSharedUrlHandled = { sharedUrlState.value = null }

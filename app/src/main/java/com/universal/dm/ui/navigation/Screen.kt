@@ -3,10 +3,10 @@ package com.universal.dm.ui.navigation
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Public
-import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
@@ -39,7 +39,7 @@ enum class Screen(
     Settings(
         route = "settings",
         title = "Settings",
-        selectedIcon = Icons.Filled.Tune,
-        unselectedIcon = Icons.Outlined.Tune
+        selectedIcon = Icons.Filled.Settings,
+        unselectedIcon = Icons.Outlined.Settings
     )
 }

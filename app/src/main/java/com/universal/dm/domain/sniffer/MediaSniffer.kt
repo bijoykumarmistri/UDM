@@ -7,6 +7,7 @@ import com.universal.dm.data.model.DetectedPageMedia
 import com.universal.dm.data.model.MediaType
 import com.universal.dm.data.model.StreamVariant
 import com.universal.dm.data.model.VideoCodec
+import com.universal.dm.core.NetworkClient
 import com.yausername.youtubedl_android.YoutubeDL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -14,14 +15,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 class MediaSniffer(
-    private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+    private val okHttpClient: OkHttpClient = NetworkClient.client
 ) {
 
     private val supportedPlatformDomains = listOf(
@@ -130,19 +126,46 @@ class MediaSniffer(
             }
 
             try {
-                // 1. First attempt: YoutubeDL stream extraction with --no-playlist protection
+                com.universal.dm.UdmApplication.ensureYoutubeDlInitialized(com.universal.dm.UdmApplication.instance)
+
+                // 1. Primary attempt: Native yt-dlp extractor (clean metadata and full multi-codec streams)
                 val request = com.yausername.youtubedl_android.YoutubeDLRequest(cleanUrl).apply {
                     addOption("--no-playlist")
                     addOption("--no-warnings")
                     addOption("--no-check-certificates")
-                    addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                    addOption("--geo-bypass")
                 }
 
-                val videoInfo = runCatching {
+                var videoInfo = runCatching {
                     YoutubeDL.getInstance().getInfo(request)
                 }.onFailure {
-                    Log.e(TAG, "YoutubeDL stream extraction failed for $cleanUrl", it)
+                    Log.w(TAG, "Primary YoutubeDL extraction failed for $cleanUrl", it)
                 }.getOrNull()
+
+                // Fallback attempt: If primary was challenged or failed, pass cookies from browser session if present
+                if ((videoInfo == null || videoInfo.formats.isNullOrEmpty()) && isYouTube) {
+                    val cookies = runCatching {
+                        android.webkit.CookieManager.getInstance().getCookie("https://www.youtube.com")
+                    }.getOrNull()
+
+                    val fallbackRequest = com.yausername.youtubedl_android.YoutubeDLRequest(cleanUrl).apply {
+                        addOption("--no-playlist")
+                        addOption("--no-warnings")
+                        addOption("--no-check-certificates")
+                        addOption("--geo-bypass")
+                        if (!cookies.isNullOrBlank()) {
+                            addOption("--add-header", "Cookie: $cookies")
+                        }
+                    }
+
+                    videoInfo = runCatching {
+                        YoutubeDL.getInstance().getInfo(fallbackRequest)
+                    }.onFailure {
+                        Log.e(TAG, "All YoutubeDL extraction attempts failed for $cleanUrl", it)
+                    }.getOrNull()
+                }
+
+                Log.d(TAG, "Extraction result for $cleanUrl: videoInfo != null: ${videoInfo != null}, formats=${videoInfo?.formats?.size ?: 0}")
 
                 if (videoInfo != null && !videoInfo.formats.isNullOrEmpty()) {
                     val title = videoInfo.title ?: videoInfo.fulltitle ?: fallbackTitle ?: "Video Media"
@@ -152,15 +175,31 @@ class MediaSniffer(
                     val audioVariants = mutableListOf<StreamVariant>()
                     val videoVariants = mutableListOf<StreamVariant>()
 
-                    videoInfo.formats?.forEach { format ->
-                        val formatUrl = format.url ?: return@forEach
+                    videoInfo.formats?.forEachIndexed { index, format ->
                         val vcodec = format.vcodec?.lowercase(Locale.ROOT)
                         val acodec = format.acodec?.lowercase(Locale.ROOT)
                         val ext = format.ext ?: "mp4"
 
-                        val isAudioOnly = (vcodec == null || vcodec == "none" || format.height <= 0) &&
+                        // Ignore storyboard thumbnail frame spritesheets (sb0-sb3, ext=mhtml, or tracks with no audio and no video)
+                        val isStoryboard = format.formatId?.startsWith("sb") == true || ext == "mhtml" ||
+                                ((vcodec == null || vcodec == "none") && (acodec == null || acodec == "none"))
+                        if (isStoryboard) return@forEachIndexed
+
+                        val formatUrl = format.url ?: format.manifestUrl ?: cleanUrl
+
+                        val parsedHeight = if (format.height > 0) {
+                            format.height
+                        } else {
+                            Regex("(\\d{3,4})p?").find(format.formatNote ?: "")?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                        }
+
+                        val isAudioOnly = (vcodec == null || vcodec == "none" || parsedHeight <= 0) &&
                                 (acodec != null && acodec != "none")
-                        val isVideo = vcodec != null && vcodec != "none" && format.height > 0
+                        val isVideo = (vcodec != null && vcodec != "none") || parsedHeight > 0
+
+                        if (index < 10) {
+                            Log.d(TAG, "Format[$index]: id=${format.formatId}, urlNull=${format.url == null}, vcodec=$vcodec, acodec=$acodec, height=$parsedHeight, isVideo=$isVideo, isAudio=$isAudioOnly")
+                        }
 
                         val mappedVideoCodec = when {
                             vcodec?.startsWith("av01") == true -> VideoCodec.AV1
@@ -222,7 +261,7 @@ class MediaSniffer(
                             )
                         } else if (isVideo) {
                             val requiresAudio = acodec == null || acodec == "none"
-                            val qualityLabel = "${format.height}p" + (if (format.fps > 30) " ${format.fps}fps" else "")
+                            val qualityLabel = (if (parsedHeight > 0) "${parsedHeight}p" else "Video") + (if (format.fps > 30) " ${format.fps}fps" else "")
 
                             videoVariants.add(
                                 StreamVariant(
@@ -230,7 +269,7 @@ class MediaSniffer(
                                     url = formatUrl,
                                     mediaType = MediaType.VIDEO,
                                     qualityLabel = qualityLabel,
-                                    resolutionHeight = format.height,
+                                    resolutionHeight = parsedHeight,
                                     bitrateKbps = format.tbr,
                                     videoCodec = mappedVideoCodec,
                                     audioCodec = mappedAudioCodec,
@@ -284,6 +323,8 @@ class MediaSniffer(
                     }.sortedByDescending { it.resolutionHeight }
 
                     val sortedAudioVariants = audioVariants.sortedByDescending { it.bitrateKbps }
+
+                    Log.d(TAG, "Processed variants for $url: video=${finalVideoVariants.size}, audio=${sortedAudioVariants.size}")
 
                     if (finalVideoVariants.isNotEmpty() || sortedAudioVariants.isNotEmpty()) {
                         return@withContext DetectedPageMedia(

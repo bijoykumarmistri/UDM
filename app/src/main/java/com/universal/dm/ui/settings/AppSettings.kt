@@ -7,6 +7,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * Persistent Application Settings backed by SharedPreferences.
@@ -65,6 +68,14 @@ class AppSettingsState(private val context: Context? = null) {
     fun updateWifiOnly(enabled: Boolean) {
         wifiOnlyDownloads = enabled
         prefs?.edit()?.putBoolean(KEY_WIFI_ONLY, enabled)?.apply()
+        val appContext = context?.applicationContext
+        if (appContext != null) {
+            CoroutineScope(Dispatchers.IO).launch {
+                runCatching {
+                    com.universal.dm.domain.downloader.DownloadManager.getInstance(appContext).updateNetworkConstraints()
+                }
+            }
+        }
     }
 
     fun updateDynamicColor(enabled: Boolean) {

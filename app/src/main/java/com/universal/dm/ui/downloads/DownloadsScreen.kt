@@ -282,7 +282,6 @@ fun DownloadsScreenContent(
     var showSortMenu by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
     var showManualUrlDialog by remember { mutableStateOf(false) }
-    var selectedSpeedMode by remember { mutableStateOf("Turbo 16x") }
     var taskToDelete by remember { mutableStateOf<DownloadTaskEntity?>(null) }
     var deleteFileFromDisk by remember { mutableStateOf(true) }
 
@@ -340,7 +339,7 @@ fun DownloadsScreenContent(
     val totalCurrentSpeed = tasks.sumOf { it.speedBytesPerSec }
     val activeRunningCount = tasks.count { it.status == DownloadStatus.DOWNLOADING || it.status == DownloadStatus.QUEUED }
     val isAnyDownloading = tasks.any { it.status == DownloadStatus.DOWNLOADING }
-    val totalActiveThreads = tasks.filter { it.status == DownloadStatus.DOWNLOADING }.sumOf { it.threadCount }
+    val totalActiveThreads = tasks.sumOf { if (it.status == DownloadStatus.DOWNLOADING) it.threadCount else 0 }
 
     LazyColumn(
         modifier = modifier
@@ -542,8 +541,6 @@ fun DownloadsScreenContent(
                 activeCount = activeRunningCount,
                 activeThreads = totalActiveThreads,
                 isDownloading = isAnyDownloading,
-                selectedSpeedMode = selectedSpeedMode,
-                onSpeedModeChange = { selectedSpeedMode = it },
                 onTogglePauseAll = {
                     if (isAnyDownloading) onPauseAll() else onResumeAll()
                 },
@@ -565,7 +562,11 @@ fun DownloadsScreenContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    items(categories) { (cat, count) ->
+                    items(
+                        items = categories,
+                        key = { it.first },
+                        contentType = { "CategoryChip" }
+                    ) { (cat, count) ->
                         val isSelected = selectedCategory == cat
                         val chipSource = remember { MutableInteractionSource() }
                         val isPressed by chipSource.collectIsPressedAsState()
@@ -778,7 +779,11 @@ fun DownloadsScreenContent(
         }
 
         // 6. TASK CARDS (Active, Paused, and Completed)
-        items(filteredTasks, key = { it.id }) { task ->
+        items(
+            items = filteredTasks,
+            key = { it.id },
+            contentType = { it.mediaType.name }
+        ) { task ->
             val chunks = chunksMap[task.id] ?: emptyList()
             LuxuryDownloadTaskCard(
                 modifier = Modifier.animateItem(),
@@ -874,23 +879,11 @@ fun DownloadsScreenContent(
     }
 }
 
-/**
- * High-End "Quantum Throughput" Hero Dashboard
- * Displays real-time speed, live audio-style animated bandwidth waveform, peak speed, and turbo controls.
- */
 @Composable
-fun QuantumThroughputHeroCard(
-    totalSpeed: Long,
-    peakSpeed: Long,
-    activeCount: Int,
-    activeThreads: Int,
+private fun GlowingSpeedIconPill(
     isDownloading: Boolean,
-    selectedSpeedMode: String,
-    onSpeedModeChange: (String) -> Unit,
-    onTogglePauseAll: () -> Unit,
-    onAddNewDownload: () -> Unit
+    modifier: Modifier = Modifier
 ) {
-    // Infinite animation for glowing speed pulse (only active when downloading)
     val pulseGlowAlpha = if (isDownloading) {
         val infiniteTransition = rememberInfiniteTransition(label = "PulseGlow")
         infiniteTransition.animateFloat(
@@ -904,6 +897,48 @@ fun QuantumThroughputHeroCard(
         ).value
     } else 0.45f
 
+    Box(
+        modifier = modifier
+            .size(52.dp)
+            .clip(CircleShape)
+            .background(
+                Brush.radialGradient(
+                    listOf(
+                        Color(0xFF00E5FF).copy(alpha = if (isDownloading) pulseGlowAlpha * 0.45f else 0.15f),
+                        Color(0xFF032233)
+                    )
+                )
+            )
+            .border(
+                1.5.dp,
+                if (isDownloading) Color(0xFF00E5FF).copy(alpha = pulseGlowAlpha) else Color(0xFF133245),
+                CircleShape
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Speed,
+            contentDescription = null,
+            tint = if (isDownloading) Color(0xFF00E5FF) else Color(0xFF7593A5),
+            modifier = Modifier.size(26.dp)
+        )
+    }
+}
+
+/**
+ * High-End "Quantum Throughput" Hero Dashboard
+ * Displays real-time speed, live audio-style animated bandwidth waveform, peak speed, and turbo controls.
+ */
+@Composable
+fun QuantumThroughputHeroCard(
+    totalSpeed: Long,
+    peakSpeed: Long,
+    activeCount: Int,
+    activeThreads: Int,
+    isDownloading: Boolean,
+    onTogglePauseAll: () -> Unit,
+    onAddNewDownload: () -> Unit
+) {
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val statCardBorder = if (isDark) {
         BorderStroke(
@@ -950,33 +985,8 @@ fun QuantumThroughputHeroCard(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Glowing Icon Pill
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.radialGradient(
-                                    listOf(
-                                        Color(0xFF00E5FF).copy(alpha = if (isDownloading) pulseGlowAlpha * 0.45f else 0.15f),
-                                        Color(0xFF032233)
-                                    )
-                                )
-                            )
-                            .border(
-                                1.5.dp,
-                                if (isDownloading) Color(0xFF00E5FF).copy(alpha = pulseGlowAlpha) else Color(0xFF133245),
-                                CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Speed,
-                            contentDescription = null,
-                            tint = if (isDownloading) Color(0xFF00E5FF) else Color(0xFF7593A5),
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
+                    // Glowing Icon Pill (Isolated to prevent card-wide recomposition thrash)
+                    GlowingSpeedIconPill(isDownloading = isDownloading)
 
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Row(
@@ -1060,57 +1070,6 @@ fun QuantumThroughputHeroCard(
             BandwidthActivityWaveform(
                 isDownloading = isDownloading
             )
-
-            // Speed Profile Presets (Turbo 16x / Balanced 8x / Eco 4x)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                listOf("Turbo 16x", "Balanced 8x", "Eco 4x").forEach { mode ->
-                    val isModeSelected = selectedSpeedMode == mode
-                    val modeEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
-                    val modeBgColor by animateColorAsState(
-                        targetValue = if (isModeSelected) Color(0xFF00E5FF).copy(alpha = 0.15f) else Color(0xFF0D1F2D),
-                        animationSpec = tween(180, easing = modeEasing),
-                        label = "modeBgColor"
-                    )
-                    val modeBorderColor by animateColorAsState(
-                        targetValue = if (isModeSelected) Color(0xFF00E5FF) else Color(0xFF17354A),
-                        animationSpec = tween(180, easing = modeEasing),
-                        label = "modeBorderColor"
-                    )
-                    val modeTextColor by animateColorAsState(
-                        targetValue = if (isModeSelected) Color(0xFF00E5FF) else Color(0xFF7F9CB0),
-                        animationSpec = tween(180, easing = modeEasing),
-                        label = "modeTextColor"
-                    )
-
-                    Surface(
-                        onClick = { onSpeedModeChange(mode) },
-                        shape = RoundedCornerShape(8.dp),
-                        color = modeBgColor,
-                        border = BorderStroke(1.dp, modeBorderColor),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier.padding(vertical = 5.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = mode,
-                                style = TextStyle(
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isModeSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = modeTextColor
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            HorizontalDivider(color = Color(0xFF132A3B))
 
             // Row 3: Action Buttons (Pause All / Resume All + Add Download)
             Row(
@@ -1224,7 +1183,7 @@ fun BandwidthActivityWaveform(
     isDownloading: Boolean
 ) {
     val barCount = 24
-    val phase = if (isDownloading) {
+    val phaseState = if (isDownloading) {
         val transition = rememberInfiniteTransition(label = "WavePhase")
         transition.animateFloat(
             initialValue = 0f,
@@ -1234,14 +1193,15 @@ fun BandwidthActivityWaveform(
                 repeatMode = RepeatMode.Restart
             ),
             label = "Phase"
-        ).value
-    } else 0f
+        )
+    } else null
 
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
             .height(28.dp)
     ) {
+        val phase = phaseState?.value ?: 0f
         val totalWidth = size.width
         val barHeight = size.height
         val spacing = 3.dp.toPx()

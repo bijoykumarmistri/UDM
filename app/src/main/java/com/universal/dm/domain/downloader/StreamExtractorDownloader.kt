@@ -45,16 +45,21 @@ class StreamExtractorDownloader(
         request.addOption("--concurrent-fragments", threadCount.coerceIn(1, 16))
         request.addOption("--retries", "10")
         request.addOption("--fragment-retries", "10")
-        request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+        request.addOption("--geo-bypass")
+
+        val isYouTube = url.contains("youtube.com", ignoreCase = true) ||
+                url.contains("youtu.be", ignoreCase = true)
+
+        if (!isYouTube) {
+            request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+        }
+
         if (!referer.isNullOrBlank() && !referer.equals(url, ignoreCase = true)) {
             request.addOption("--referer", referer)
         }
 
         // Extract target height (e.g. 2160, 1440, 1080, 720, 480)
         val height = Regex("\\d+").find(qualityLabel)?.value?.toIntOrNull() ?: 1080
-
-        val isYouTube = url.contains("youtube.com", ignoreCase = true) ||
-                url.contains("youtu.be", ignoreCase = true)
 
         if (mediaType == MediaType.VIDEO) {
             if (isYouTube) {
@@ -139,6 +144,7 @@ class StreamExtractorDownloader(
 
         val startTime = System.currentTimeMillis()
 
+        com.universal.dm.UdmApplication.ensureYoutubeDlInitialized(com.universal.dm.UdmApplication.instance)
         YoutubeDL.getInstance().execute(request, taskId) { progress, _, line ->
             lastOutputLine = line
             Log.d("StreamDownloader", "yt-dlp [$taskId]: $line")
