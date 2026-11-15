@@ -32,15 +32,7 @@ class ExampleInstrumentedTest {
         val media = sniffer.extractMedia(cleanUrl)
 
         assertNotNull("Expected media to be detected", media)
-        android.util.Log.d("TestExtraction", "SUCCESS: Title='${media!!.pageTitle}', Videos=${media.videoVariants.size}, Audios=${media.audioVariants.size}")
-        media.videoVariants.take(8).forEach {
-            android.util.Log.d("TestExtraction", "   Video Variant: label=${it.qualityLabel}, ${it.resolutionHeight}p, codec=${it.videoCodec}, size=${it.fileSizeBytes}, merge=${it.requiresAudioMerge}")
-        }
-        media.audioVariants.take(5).forEach {
-            android.util.Log.d("TestExtraction", "   Audio Variant: label=${it.qualityLabel}, codec=${it.audioCodec}, size=${it.fileSizeBytes}")
-        }
-
-        assertTrue("Expected video variants", media.videoVariants.isNotEmpty())
+        assertTrue("Expected video variants", media!!.videoVariants.isNotEmpty())
         assertTrue("Expected audio variants", media.audioVariants.isNotEmpty())
     }
 }

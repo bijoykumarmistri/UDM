@@ -161,6 +161,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     val mediaSniffer: MediaSniffer = MediaSniffer()
 
     private var mediaExtractionJob: Job? = null
+    private var activeExtractionCleanUrl: String? = null
+    private var isAutoShowRequestedForActiveExtraction: Boolean = false
 
     fun onUrlInputChanged(newInput: String) {
         _uiState.update { it.copy(urlInput = newInput) }
@@ -518,10 +520,38 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun triggerMediaExtraction(url: String, fallbackTitle: String?, autoShowBottomSheet: Boolean = false) {
-        android.util.Log.d("BrowserViewModel", "triggerMediaExtraction called for: $url, autoShow: $autoShowBottomSheet")
-        // Prevent re-triggering if we already extracted media for this exact page or if an extraction is actively in progress
+        val cleanUrl = mediaSniffer.cleanMediaUrl(url)
+        android.util.Log.d("BrowserViewModel", "triggerMediaExtraction called for: $url (clean: $cleanUrl), autoShow: $autoShowBottomSheet")
+
+        // 1. Check in-memory LRU cache first (0ms instant response)
+        val cached = mediaSniffer.getCachedMedia(cleanUrl) ?: mediaSniffer.getCachedMedia(url)
+        if (cached != null) {
+            android.util.Log.d("BrowserViewModel", "Instant cache hit for $cleanUrl")
+            _uiState.update { current ->
+                val shouldShow = autoShowBottomSheet || current.showMediaBottomSheet || current.autoOpenBottomSheetOnMediaDetected
+                current.copy(
+                    isExtractingMedia = false,
+                    detectedMediaState = cached,
+                    showMediaBottomSheet = shouldShow,
+                    autoOpenBottomSheetOnMediaDetected = false
+                )
+            }
+            return
+        }
+
+        // 2. Prevent restarting or cancelling if extraction is currently in-flight for this exact URL!
+        if (mediaExtractionJob?.isActive == true && activeExtractionCleanUrl == cleanUrl) {
+            android.util.Log.d("BrowserViewModel", "Extraction already in progress for $cleanUrl; deduplicating.")
+            if (autoShowBottomSheet) {
+                isAutoShowRequestedForActiveExtraction = true
+            }
+            return
+        }
+
+        // 3. Prevent re-triggering if current UI state already has full media for this URL
         val currentMedia = _uiState.value.detectedMediaState
-        if (currentMedia != null && currentMedia.pageUrl == url && currentMedia.videoVariants.size > 1) {
+        val currentCleanUrl = currentMedia?.pageUrl?.let { mediaSniffer.cleanMediaUrl(it) }
+        if (currentMedia != null && (currentCleanUrl == cleanUrl || currentMedia.pageUrl == url) && currentMedia.videoVariants.size > 1) {
             android.util.Log.d("BrowserViewModel", "Already have extracted media for $url")
             if (autoShowBottomSheet) {
                 _uiState.update { it.copy(showMediaBottomSheet = true) }
@@ -530,44 +560,54 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
 
         mediaExtractionJob?.cancel()
+        activeExtractionCleanUrl = cleanUrl
+        isAutoShowRequestedForActiveExtraction = autoShowBottomSheet
+
         mediaExtractionJob = viewModelScope.launch {
-            _uiState.update { it.copy(isExtractingMedia = true) }
-            android.util.Log.d("BrowserViewModel", "Launching extractMedia for: $url")
-            val media = mediaSniffer.extractMedia(url, fallbackTitle)
-            android.util.Log.d("BrowserViewModel", "extractMedia finished for $url. Result media != null: ${media != null}, videoVariants: ${media?.videoVariants?.size ?: 0}")
-            val hasRealStreams = media != null && (
-                media.videoVariants.isNotEmpty() ||
-                media.audioVariants.isNotEmpty() ||
-                media.directFileUrl != null ||
-                media.directFileVariant != null
-            )
-            val validMedia = if (hasRealStreams) media else null
-
-            _uiState.update { current ->
-                val oldVariantsCount = (current.detectedMediaState?.videoVariants?.size ?: 0) +
-                        (current.detectedMediaState?.audioVariants?.size ?: 0) +
-                        (if (current.detectedMediaState?.directFileVariant != null || current.detectedMediaState?.directFileUrl != null) 1 else 0)
-                val newVariantsCount = (validMedia?.videoVariants?.size ?: 0) +
-                        (validMedia?.audioVariants?.size ?: 0) +
-                        (if (validMedia?.directFileVariant != null || validMedia?.directFileUrl != null) 1 else 0)
-
-                val shouldUpdateMedia = when {
-                    validMedia == null -> false
-                    current.detectedMediaState == null -> true
-                    validMedia.directFileVariant != null -> true
-                    newVariantsCount >= oldVariantsCount -> true
-                    else -> false
-                }
-
-                val finalMedia = if (shouldUpdateMedia) validMedia else current.detectedMediaState
-                val shouldShow = (autoShowBottomSheet || current.autoOpenBottomSheetOnMediaDetected) && finalMedia != null
-                android.util.Log.d("BrowserViewModel", "Updated detectedMediaState: finalMedia != null: ${finalMedia != null}, shouldShow: $shouldShow")
-                current.copy(
-                    isExtractingMedia = false,
-                    detectedMediaState = finalMedia,
-                    showMediaBottomSheet = shouldShow || current.showMediaBottomSheet,
-                    autoOpenBottomSheetOnMediaDetected = if (shouldShow) false else current.autoOpenBottomSheetOnMediaDetected
+            try {
+                _uiState.update { it.copy(isExtractingMedia = true) }
+                android.util.Log.d("BrowserViewModel", "Launching extractMedia for: $url")
+                val media = mediaSniffer.extractMedia(url, fallbackTitle)
+                android.util.Log.d("BrowserViewModel", "extractMedia finished for $url. Result media != null: ${media != null}, videoVariants: ${media?.videoVariants?.size ?: 0}")
+                val hasRealStreams = media != null && (
+                    media.videoVariants.isNotEmpty() ||
+                    media.audioVariants.isNotEmpty() ||
+                    media.directFileUrl != null ||
+                    media.directFileVariant != null
                 )
+                val validMedia = if (hasRealStreams) media else null
+
+                _uiState.update { current ->
+                    val oldVariantsCount = (current.detectedMediaState?.videoVariants?.size ?: 0) +
+                            (current.detectedMediaState?.audioVariants?.size ?: 0) +
+                            (if (current.detectedMediaState?.directFileVariant != null || current.detectedMediaState?.directFileUrl != null) 1 else 0)
+                    val newVariantsCount = (validMedia?.videoVariants?.size ?: 0) +
+                            (validMedia?.audioVariants?.size ?: 0) +
+                            (if (validMedia?.directFileVariant != null || validMedia?.directFileUrl != null) 1 else 0)
+
+                    val shouldUpdateMedia = when {
+                        validMedia == null -> false
+                        current.detectedMediaState == null -> true
+                        validMedia.directFileVariant != null -> true
+                        newVariantsCount >= oldVariantsCount -> true
+                        else -> false
+                    }
+
+                    val finalMedia = if (shouldUpdateMedia) validMedia else current.detectedMediaState
+                    val shouldShow = (autoShowBottomSheet || isAutoShowRequestedForActiveExtraction || current.autoOpenBottomSheetOnMediaDetected) && finalMedia != null
+                    android.util.Log.d("BrowserViewModel", "Updated detectedMediaState: finalMedia != null: ${finalMedia != null}, shouldShow: $shouldShow")
+                    current.copy(
+                        isExtractingMedia = false,
+                        detectedMediaState = finalMedia,
+                        showMediaBottomSheet = shouldShow || current.showMediaBottomSheet,
+                        autoOpenBottomSheetOnMediaDetected = if (shouldShow) false else current.autoOpenBottomSheetOnMediaDetected
+                    )
+                }
+            } finally {
+                if (activeExtractionCleanUrl == cleanUrl) {
+                    activeExtractionCleanUrl = null
+                    isAutoShowRequestedForActiveExtraction = false
+                }
             }
         }
     }
@@ -575,6 +615,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun cancelSniffing() {
         mediaExtractionJob?.cancel()
         mediaExtractionJob = null
+        activeExtractionCleanUrl = null
+        isAutoShowRequestedForActiveExtraction = false
         _uiState.update { it.copy(isExtractingMedia = false) }
     }
 

@@ -22,9 +22,11 @@ class UdmApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        // YoutubeDL & FFmpeg initialization is completely on-demand via ensureYoutubeDlInitialized()
-        // when a stream extraction or sniffer action is executed. This guarantees 100% CPU & I/O
-        // bandwidth for cold start and initial app interactions.
+        // Pre-warm YoutubeDL and FFmpeg asynchronously on IO dispatcher so media extraction
+        // executes instantly with 0 cold-start initialization latency when a video is loaded.
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            ensureYoutubeDlInitialized(this@UdmApplication)
+        }
     }
 
     companion object {

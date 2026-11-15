@@ -2,6 +2,7 @@ package com.universal.dm.domain.sniffer
 
 import android.net.Uri
 import android.util.Log
+import android.util.LruCache
 import com.universal.dm.data.model.AudioCodec
 import com.universal.dm.data.model.DetectedPageMedia
 import com.universal.dm.data.model.MediaType
@@ -19,6 +20,13 @@ import java.util.Locale
 class MediaSniffer(
     private val okHttpClient: OkHttpClient = NetworkClient.client
 ) {
+
+    private val mediaCache = LruCache<String, DetectedPageMedia>(64)
+
+    fun getCachedMedia(url: String): DetectedPageMedia? {
+        val cleanUrl = cleanMediaUrl(url)
+        return mediaCache.get(cleanUrl) ?: mediaCache.get(url)
+    }
 
     private val supportedPlatformDomains = listOf(
         "youtube.com", "youtu.be", "vimeo.com", "dailymotion.com",
@@ -118,6 +126,11 @@ class MediaSniffer(
     suspend fun extractMedia(url: String, fallbackTitle: String? = null): DetectedPageMedia? =
         withContext(Dispatchers.IO) {
             val cleanUrl = cleanMediaUrl(url)
+
+            // Cache hit check (0ms return for visited / already extracted videos or files)
+            getCachedMedia(cleanUrl)?.let { return@withContext it }
+            getCachedMedia(url)?.let { return@withContext it }
+
             val isYouTube = cleanUrl.contains("youtube.com", ignoreCase = true) || cleanUrl.contains("youtu.be", ignoreCase = true)
 
             // Fast-track: Direct files (apps, zip, pdf, docs, binaries) bypass yt-dlp entirely
@@ -134,6 +147,12 @@ class MediaSniffer(
                     addOption("--no-warnings")
                     addOption("--no-check-certificates")
                     addOption("--geo-bypass")
+                    addOption("--skip-download")
+                    addOption("--no-call-home")
+                    addOption("--socket-timeout", "10")
+                    if (isYouTube) {
+                        addOption("--extractor-args", "youtube:skip=translated_subs")
+                    }
                 }
 
                 var videoInfo = runCatching {
@@ -153,6 +172,10 @@ class MediaSniffer(
                         addOption("--no-warnings")
                         addOption("--no-check-certificates")
                         addOption("--geo-bypass")
+                        addOption("--skip-download")
+                        addOption("--no-call-home")
+                        addOption("--socket-timeout", "10")
+                        addOption("--extractor-args", "youtube:skip=translated_subs")
                         if (!cookies.isNullOrBlank()) {
                             addOption("--add-header", "Cookie: $cookies")
                         }
@@ -223,11 +246,6 @@ class MediaSniffer(
                             format.tbr > 0 && duration != null && duration > 0 -> (format.tbr * 1000L * duration) / 8L
                             format.abr > 0 && duration != null && duration > 0 -> (format.abr * 1000L * duration) / 8L
                             else -> 0L
-                        }
-
-                        // For non-HLS direct media URLs on non-YouTube sites without reported size, probe real Content-Length via HTTP
-                        if (fileSize <= 0 && !isYouTube && formatUrl.startsWith("http", ignoreCase = true) && !formatUrl.contains(".m3u8", ignoreCase = true)) {
-                            fileSize = probeContentLength(formatUrl)
                         }
 
                         if (isAudioOnly) {
@@ -327,7 +345,7 @@ class MediaSniffer(
                     Log.d(TAG, "Processed variants for $url: video=${finalVideoVariants.size}, audio=${sortedAudioVariants.size}")
 
                     if (finalVideoVariants.isNotEmpty() || sortedAudioVariants.isNotEmpty()) {
-                        return@withContext DetectedPageMedia(
+                        val media = DetectedPageMedia(
                             pageTitle = title,
                             pageUrl = url,
                             thumbnailUrl = thumbnail,
@@ -335,6 +353,9 @@ class MediaSniffer(
                             videoVariants = finalVideoVariants,
                             audioVariants = sortedAudioVariants
                         )
+                        mediaCache.put(cleanUrl, media)
+                        mediaCache.put(url, media)
+                        return@withContext media
                     }
                 }
 
@@ -347,6 +368,10 @@ class MediaSniffer(
         }
 
     private fun extractDirectFileMedia(url: String, fallbackTitle: String?): DetectedPageMedia? {
+        val cleanUrl = cleanMediaUrl(url)
+        getCachedMedia(cleanUrl)?.let { return it }
+        getCachedMedia(url)?.let { return it }
+
         val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         val request = Request.Builder()
             .url(url)
@@ -476,7 +501,7 @@ class MediaSniffer(
                     fallbackTitle ?: if (isDirectFile) "Downloaded File" else "Video Media"
                 }
 
-                DetectedPageMedia(
+                val directMedia = DetectedPageMedia(
                     pageTitle = displayTitle,
                     pageUrl = url,
                     thumbnailUrl = null,
@@ -486,45 +511,11 @@ class MediaSniffer(
                     directFileUrl = if (isDirectFile) url else null,
                     directFileVariant = if (isDirectFile) singleVariant else null
                 )
+                mediaCache.put(cleanUrl, directMedia)
+                mediaCache.put(url, directMedia)
+                directMedia
             }
         }.getOrNull()
-    }
-
-    private fun probeContentLength(url: String): Long {
-        if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
-            return 0L
-        }
-        if (url.contains(".m3u8", ignoreCase = true) || url.contains(".mpd", ignoreCase = true)) {
-            return 0L
-        }
-        return try {
-            val req = Request.Builder()
-                .url(url)
-                .head()
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-                .build()
-            val len = okHttpClient.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    resp.header("Content-Length")?.toLongOrNull() ?: 0L
-                } else 0L
-            }
-            if (len > 0) return len
-
-            // Fallback for servers rejecting HEAD: GET with Range: bytes=0-0
-            val rangeReq = Request.Builder()
-                .url(url)
-                .header("Range", "bytes=0-0")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-                .build()
-            okHttpClient.newCall(rangeReq).execute().use { resp ->
-                val contentRange = resp.header("Content-Range")
-                if (contentRange != null && contentRange.contains("/")) {
-                    contentRange.substringAfterLast("/").trim().toLongOrNull() ?: 0L
-                } else 0L
-            }
-        } catch (_: Exception) {
-            0L
-        }
     }
 
     companion object {
