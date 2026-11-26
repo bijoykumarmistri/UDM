@@ -41,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -51,8 +50,7 @@ import androidx.compose.ui.unit.sp
 import com.universal.dm.ui.theme.UDMTheme
 
 /**
- * Premium Apple-grade Search Engine Selector Dialog for UDM V2.
- * Features dark glassmorphic styling, fluid spring press scaling, and tactile haptic feedback.
+ * Search Engine Selector Dialog using Material 3 semantic color tokens.
  */
 @Composable
 fun SearchEngineSelectionDialog(
@@ -61,11 +59,11 @@ fun SearchEngineSelectionDialog(
     onDismiss: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
-    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val colorScheme = MaterialTheme.colorScheme
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = if (isDark) Color(0xFF09141D) else MaterialTheme.colorScheme.surfaceContainerHigh,
+        containerColor = colorScheme.surfaceContainerHigh,
         shape = RoundedCornerShape(28.dp),
         title = {
             Row(
@@ -76,14 +74,14 @@ fun SearchEngineSelectionDialog(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(if (isDark) Color(0xFF0D2833) else Color(0xFFE0F7FA))
-                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), CircleShape),
+                        .background(colorScheme.primaryContainer)
+                        .border(1.dp, colorScheme.primary.copy(alpha = 0.4f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -92,12 +90,12 @@ fun SearchEngineSelectionDialog(
                         text = "Default Search Engine",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = colorScheme.onSurface
                     )
                     Text(
                         text = "Select your preferred omnibar engine",
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -122,16 +120,16 @@ fun SearchEngineSelectionDialog(
                     )
 
                     val borderColor by animateColorAsState(
-                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else if (isDark) Color(0xFF142B39) else MaterialTheme.colorScheme.outlineVariant,
+                        targetValue = if (isSelected) colorScheme.primary else colorScheme.outlineVariant,
                         animationSpec = spring(dampingRatio = 0.85f),
                         label = "CardBorder"
                     )
 
                     val backgroundColor by animateColorAsState(
                         targetValue = if (isSelected) {
-                            if (isDark) Color(0x66004D59) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                            colorScheme.primaryContainer.copy(alpha = 0.6f)
                         } else {
-                            if (isDark) Color(0xFF0C1924) else MaterialTheme.colorScheme.surface
+                            colorScheme.surfaceContainerLow
                         },
                         animationSpec = spring(dampingRatio = 0.85f),
                         label = "CardBackground"
@@ -168,37 +166,28 @@ fun SearchEngineSelectionDialog(
                                     text = engine.displayName,
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) {
-                                        if (isDark) Color.White else MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
-                                    }
+                                    color = if (isSelected) colorScheme.onPrimaryContainer else colorScheme.onSurface
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = engine.hint,
                                     fontSize = 12.sp,
-                                    color = if (isSelected) {
-                                        if (isDark) Color(0xFF80DEEA) else MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
+                                    color = if (isSelected) colorScheme.onPrimaryContainer.copy(alpha = 0.85f) else colorScheme.onSurfaceVariant
                                 )
                             }
 
                             Spacer(modifier = Modifier.width(12.dp))
 
-                            // Indicator Icon
                             Box(
                                 modifier = Modifier
                                     .size(24.dp)
                                     .clip(CircleShape)
                                     .background(
-                                        if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
+                                        if (isSelected) colorScheme.primary else Color.Transparent
                                     )
                                     .border(
                                         width = if (isSelected) 0.dp else 1.5.dp,
-                                        color = if (isSelected) Color.Transparent else if (isDark) Color(0xFF4A6267) else MaterialTheme.colorScheme.outline,
+                                        color = if (isSelected) Color.Transparent else colorScheme.outline,
                                         shape = CircleShape
                                     ),
                                 contentAlignment = Alignment.Center
@@ -207,7 +196,7 @@ fun SearchEngineSelectionDialog(
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = "Selected",
-                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        tint = colorScheme.onPrimary,
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
@@ -221,7 +210,7 @@ fun SearchEngineSelectionDialog(
             TextButton(
                 onClick = onDismiss,
                 colors = ButtonDefaults.textButtonColors(
-                    contentColor = MaterialTheme.colorScheme.primary
+                    contentColor = colorScheme.primary
                 )
             ) {
                 Text(
@@ -234,10 +223,22 @@ fun SearchEngineSelectionDialog(
     )
 }
 
-@Preview(showBackground = true)
+@Preview(name = "Search Engine Dialog - Light", showBackground = true)
 @Composable
-fun SearchEngineSelectionDialogPreview() {
-    UDMTheme {
+fun SearchEngineSelectionDialogLightPreview() {
+    UDMTheme(darkTheme = false, dynamicColor = false) {
+        SearchEngineSelectionDialog(
+            selectedEngine = SearchEngine.DUCKDUCKGO,
+            onSelectEngine = {},
+            onDismiss = {}
+        )
+    }
+}
+
+@Preview(name = "Search Engine Dialog - Dark", showBackground = true)
+@Composable
+fun SearchEngineSelectionDialogDarkPreview() {
+    UDMTheme(darkTheme = true, dynamicColor = false) {
         SearchEngineSelectionDialog(
             selectedEngine = SearchEngine.DUCKDUCKGO,
             onSelectEngine = {},

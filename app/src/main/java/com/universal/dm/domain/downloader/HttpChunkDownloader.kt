@@ -4,10 +4,15 @@ import com.universal.dm.core.NetworkClient
 import com.universal.dm.data.local.DownloadChunkEntity
 import com.universal.dm.data.local.DownloadDao
 import com.universal.dm.data.model.DownloadStatus
+import com.universal.dm.domain.sniffer.MediaSizeCalculator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -33,7 +38,11 @@ class HttpChunkDownloader(
         referer: String? = null,
         onProgress: suspend (downloadedBytes: Long, totalBytes: Long, speedBytesPerSec: Long) -> Unit
     ): File = withContext(Dispatchers.IO) {
-        // 1. Probe Server Headers (HEAD request with Range fallback)
+        targetFile.parentFile?.let { parent ->
+            if (!parent.exists()) parent.mkdirs()
+        }
+
+        // 1. Probe server capabilities (Content-Length & HTTP Range support)
         val probeResult = probeServer(url, referer)
         val contentLength = probeResult.contentLength
         val supportsRanges = probeResult.supportsRanges && contentLength > 0L
@@ -69,26 +78,30 @@ class HttpChunkDownloader(
         referer: String? = null,
         onProgress: suspend (Long, Long, Long) -> Unit
     ): File = coroutineScope {
-        // Pre-allocate file space
+        // Pre-allocate target file to exact content length
         if (!targetFile.exists() || targetFile.length() != contentLength) {
             RandomAccessFile(targetFile, "rw").use { it.setLength(contentLength) }
         }
 
-        // Check if chunks already exist in Room (for Pause / Resume)
         var existingChunks = downloadDao.getChunksForTask(taskId)
-        val threadCount = requestedThreadCount.coerceIn(1, 16)
-
-        if (existingChunks.isEmpty()) {
-            val chunkSize = contentLength / threadCount
-            val newChunks = (0 until threadCount).map { index ->
-                val start = index * chunkSize
-                val end = if (index == threadCount - 1) contentLength - 1 else (index + 1) * chunkSize - 1
+        // Re-partition if no chunks exist or if remote contentLength changed since last pause
+        val storedEnd = existingChunks.maxOfOrNull { it.endByte }
+        if (existingChunks.isEmpty() || storedEnd != contentLength - 1L) {
+            if (existingChunks.isNotEmpty()) {
+                downloadDao.deleteChunksForTask(taskId)
+            }
+            val effectiveThreads = MediaSizeCalculator.computeAdaptiveThreadCount(
+                contentLength = contentLength,
+                requestedThreads = requestedThreadCount
+            )
+            val ranges = MediaSizeCalculator.computeChunkRanges(contentLength, effectiveThreads)
+            val newChunks = ranges.mapIndexed { index, range ->
                 DownloadChunkEntity(
                     taskId = taskId,
                     threadIndex = index,
-                    startByte = start,
-                    endByte = end,
-                    currentByte = start,
+                    startByte = range.first,
+                    endByte = range.last,
+                    currentByte = range.first,
                     isCompleted = false
                 )
             }
@@ -96,37 +109,37 @@ class HttpChunkDownloader(
             existingChunks = downloadDao.getChunksForTask(taskId)
         }
 
-        // Compute already downloaded bytes
-        val initialDownloaded = existingChunks.sumOf {
-            (it.currentByte - it.startByte).coerceAtLeast(0L)
+        val initialDownloaded = existingChunks.sumOf { chunk ->
+            val chunkLen = (chunk.endByte - chunk.startByte + 1L).coerceAtLeast(0L)
+            (chunk.currentByte - chunk.startByte).coerceIn(0L, chunkLen)
         }
         val downloadedCounter = AtomicLong(initialDownloaded)
-        val lastSampleBytes = AtomicLong(initialDownloaded)
-        val lastSampleTime = AtomicLong(System.currentTimeMillis())
-        val currentSpeed = AtomicLong(0L)
+        var lastSampleBytes = initialDownloaded
+        var lastSampleNanos = System.nanoTime()
+        var emaSpeedBps = 0L
 
-        // Progress ticker coroutine updating Room & callback every 500ms
         val progressJob = launch {
             while (isActive) {
                 delay(500)
-                val now = System.currentTimeMillis()
-                val currentBytes = downloadedCounter.get()
-                val elapsedMs = (now - lastSampleTime.get()).coerceAtLeast(1L)
-                val deltaBytes = (currentBytes - lastSampleBytes.get()).coerceAtLeast(0L)
+                val nowNanos = System.nanoTime()
+                val currentBytes = downloadedCounter.get().coerceAtMost(contentLength)
+                val elapsedNanos = (nowNanos - lastSampleNanos).coerceAtLeast(1L)
+                val deltaBytes = (currentBytes - lastSampleBytes).coerceAtLeast(0L)
 
-                val speed = (deltaBytes * 1000L) / elapsedMs
-                currentSpeed.set(speed)
-                lastSampleBytes.set(currentBytes)
-                lastSampleTime.set(now)
+                val instantSpeed = ((deltaBytes.toDouble() * 1_000_000_000.0) / elapsedNanos.toDouble()).toLong()
+                emaSpeedBps = MediaSizeCalculator.smoothSpeedEma(emaSpeedBps, instantSpeed)
 
-                onProgress(currentBytes, contentLength, speed)
-                downloadDao.updateTaskProgress(taskId, currentBytes, speed, DownloadStatus.DOWNLOADING)
+                lastSampleBytes = currentBytes
+                lastSampleNanos = nowNanos
+
+                onProgress(currentBytes, contentLength, emaSpeedBps)
+                downloadDao.updateTaskProgress(taskId, currentBytes, contentLength, emaSpeedBps, DownloadStatus.DOWNLOADING)
             }
         }
 
         try {
-            // Launch parallel coroutines for each incomplete chunk
             val incompleteChunks = existingChunks.filter { !it.isCompleted && it.currentByte <= it.endByte }
+            val isMultiPart = existingChunks.size > 1
 
             val downloadJobs = incompleteChunks.map { chunk ->
                 async(Dispatchers.IO) {
@@ -134,6 +147,8 @@ class HttpChunkDownloader(
                         chunk = chunk,
                         url = url,
                         targetFile = targetFile,
+                        contentLength = contentLength,
+                        isMultiPart = isMultiPart,
                         referer = referer,
                         downloadedCounter = downloadedCounter
                     )
@@ -145,9 +160,9 @@ class HttpChunkDownloader(
             progressJob.cancel()
         }
 
-        // Final progress update
-        val finalDownloaded = downloadedCounter.get()
+        val finalDownloaded = downloadedCounter.get().coerceAtMost(contentLength)
         onProgress(finalDownloaded, contentLength, 0L)
+        downloadDao.updateTaskProgress(taskId, finalDownloaded, contentLength, 0L, DownloadStatus.DOWNLOADING)
         targetFile
     }
 
@@ -155,57 +170,114 @@ class HttpChunkDownloader(
         chunk: DownloadChunkEntity,
         url: String,
         targetFile: File,
+        contentLength: Long,
+        isMultiPart: Boolean,
         referer: String? = null,
         downloadedCounter: AtomicLong
     ) {
-        val start = chunk.currentByte
+        var currentOffset = chunk.currentByte
         val end = chunk.endByte
-        if (start > end) return
-
-        val request = Request.Builder()
-            .url(url)
-            .addHeader("Range", "bytes=$start-$end")
-            .apply {
-                if (!referer.isNullOrBlank()) {
-                    addHeader("Referer", referer)
-                }
+        if (currentOffset > end) {
+            if (!chunk.isCompleted) {
+                downloadDao.updateChunkProgress(chunk.chunkId, currentOffset, true)
             }
-            .build()
-
-        val response = okHttpClient.newCall(request).execute()
-        if (!response.isSuccessful && response.code != 206) {
-            throw IOException("Unexpected HTTP code ${response.code} for chunk ${chunk.threadIndex}")
+            return
         }
-        val body = response.body ?: throw IllegalStateException("Empty response body for chunk ${chunk.threadIndex}")
 
-        val buffer = ByteArray(64 * 1024)
-        var currentOffset = start
-        var lastDbUpdateTime = System.currentTimeMillis()
+        val buffer = ByteArray(IO_BUFFER_SIZE)
+        var attempt = 0
+        var lastDbUpdateNanos = System.nanoTime()
 
-        RandomAccessFile(targetFile, "rw").use { raf ->
-            raf.seek(start)
-            body.byteStream().use { input ->
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read == -1) break
+        try {
+            while (currentOffset <= end) {
+                val ctx = currentCoroutineContext()
+                if (!ctx.isActive) {
+                    throw CancellationException("Chunk ${chunk.threadIndex} cancelled")
+                }
 
-                    raf.write(buffer, 0, read)
-                    currentOffset += read
-                    downloadedCounter.addAndGet(read.toLong())
+                try {
+                    val request = Request.Builder()
+                        .url(url)
+                        .addHeader("Range", "bytes=$currentOffset-$end")
+                        .apply {
+                            if (!referer.isNullOrBlank()) {
+                                addHeader("Referer", referer)
+                            }
+                        }
+                        .build()
 
-                    // Save chunk offset to DB periodically
-                    val now = System.currentTimeMillis()
-                    if (now - lastDbUpdateTime > 1000) {
-                        downloadDao.updateChunkProgress(chunk.chunkId, currentOffset, false)
-                        lastDbUpdateTime = now
+                    val call = okHttpClient.newCall(request)
+                    val completionHandle = ctx[Job]?.invokeOnCompletion { call.cancel() }
+
+                    try {
+                        call.execute().use { response ->
+                            // Strict Range enforcement: if requesting a partial slice (multi-part or resumed),
+                            // HTTP 200 means the server ignored Range and would overwrite other chunks!
+                            val expectsPartial = isMultiPart || currentOffset > 0L || end < contentLength - 1L
+                            if (expectsPartial && response.code != 206) {
+                                call.cancel()
+                                throw IOException("Server ignored Range request (HTTP ${response.code}) for chunk ${chunk.threadIndex}")
+                            }
+                            if (!response.isSuccessful && response.code != 206) {
+                                throw IOException("Unexpected HTTP code ${response.code} for chunk ${chunk.threadIndex}")
+                            }
+
+                            val body = response.body
+                                ?: throw IOException("Empty response body for chunk ${chunk.threadIndex}")
+
+                            RandomAccessFile(targetFile, "rw").use { raf ->
+                                raf.seek(currentOffset)
+                                body.byteStream().use { input ->
+                                    while (currentOffset <= end) {
+                                        if (!ctx.isActive) {
+                                            throw CancellationException("Chunk ${chunk.threadIndex} paused/cancelled")
+                                        }
+                                        val remaining = (end - currentOffset) + 1L
+                                        val toRead = minOf(buffer.size.toLong(), remaining).toInt()
+                                        val read = input.read(buffer, 0, toRead)
+                                        if (read == -1) break
+
+                                        raf.write(buffer, 0, read)
+                                        currentOffset += read
+                                        downloadedCounter.addAndGet(read.toLong())
+
+                                        val nowNanos = System.nanoTime()
+                                        if (nowNanos - lastDbUpdateNanos >= CHUNK_DB_SYNC_INTERVAL_NANOS) {
+                                            downloadDao.updateChunkProgress(chunk.chunkId, currentOffset, false)
+                                            lastDbUpdateNanos = nowNanos
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } finally {
+                        completionHandle?.dispose()
                     }
+
+                    if (currentOffset <= end) {
+                        throw IOException("Premature EOF for chunk ${chunk.threadIndex} at $currentOffset/$end")
+                    }
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (ioe: IOException) {
+                    attempt++
+                    if (attempt > MAX_CHUNK_RETRIES || !ctx.isActive) {
+                        throw ioe
+                    }
+                    // Save partial progress before backoff retry
+                    withContext(NonCancellable) {
+                        downloadDao.updateChunkProgress(chunk.chunkId, currentOffset, false)
+                    }
+                    delay(RETRY_BASE_DELAY_MS * (1L shl (attempt - 1)))
                 }
             }
+        } finally {
+            // Persist exact offset (even on pause/cancellation) so resume never loses buffered bytes
+            val isFinished = currentOffset > end
+            withContext(NonCancellable) {
+                downloadDao.updateChunkProgress(chunk.chunkId, currentOffset, isFinished)
+            }
         }
-
-        // Mark chunk as completed
-        val isFinished = currentOffset >= end
-        downloadDao.updateChunkProgress(chunk.chunkId, currentOffset, isFinished)
     }
 
     private suspend fun downloadSingleStream(
@@ -224,49 +296,70 @@ class HttpChunkDownloader(
                 }
             }
             .build()
-        val response = okHttpClient.newCall(request).execute()
-        if (!response.isSuccessful) {
-            throw IOException("Unexpected HTTP code ${response.code} downloading stream")
-        }
-        val body = response.body ?: throw IllegalStateException("Empty response body")
 
-        val total = if (contentLength > 0) contentLength else body.contentLength()
+        val call = okHttpClient.newCall(request)
+        val completionHandle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
+
         var downloaded = 0L
-        val buffer = ByteArray(64 * 1024)
-        var lastSampleTime = System.currentTimeMillis()
-        var lastSampleBytes = 0L
+        var total = contentLength
+        try {
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("Unexpected HTTP code ${response.code} downloading stream")
+                }
+                val body = response.body ?: throw IOException("Empty response body")
 
-        FileOutputStream(targetFile).use { output ->
-            body.byteStream().use { input ->
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read == -1) break
+                if (total <= 0L) {
+                    total = body.contentLength().coerceAtLeast(0L)
+                }
 
-                    output.write(buffer, 0, read)
-                    downloaded += read
+                val buffer = ByteArray(IO_BUFFER_SIZE)
+                var lastSampleNanos = System.nanoTime()
+                var lastSampleBytes = 0L
+                var emaSpeedBps = 0L
 
-                    val now = System.currentTimeMillis()
-                    if (now - lastSampleTime >= 500) {
-                        val elapsedMs = (now - lastSampleTime).coerceAtLeast(1L)
-                        val delta = (downloaded - lastSampleBytes).coerceAtLeast(0L)
-                        val speed = (delta * 1000L) / elapsedMs
+                FileOutputStream(targetFile).use { output ->
+                    body.byteStream().use { input ->
+                        while (true) {
+                            if (!isActive) {
+                                throw CancellationException("Single stream cancelled")
+                            }
+                            val read = input.read(buffer)
+                            if (read == -1) break
 
-                        lastSampleBytes = downloaded
-                        lastSampleTime = now
+                            output.write(buffer, 0, read)
+                            downloaded += read
 
-                        onProgress(downloaded, total, speed)
-                        downloadDao.updateTaskProgress(taskId, downloaded, speed, DownloadStatus.DOWNLOADING)
+                            val nowNanos = System.nanoTime()
+                            val elapsedNanos = nowNanos - lastSampleNanos
+                            if (elapsedNanos >= PROGRESS_TICK_NANOS) {
+                                val delta = (downloaded - lastSampleBytes).coerceAtLeast(0L)
+                                val instantSpeed = ((delta.toDouble() * 1_000_000_000.0) / elapsedNanos.toDouble()).toLong()
+                                emaSpeedBps = MediaSizeCalculator.smoothSpeedEma(emaSpeedBps, instantSpeed)
+
+                                lastSampleBytes = downloaded
+                                lastSampleNanos = nowNanos
+
+                                onProgress(downloaded, total, emaSpeedBps)
+                                downloadDao.updateTaskProgress(taskId, downloaded, total, emaSpeedBps, DownloadStatus.DOWNLOADING)
+                            }
+                        }
                     }
                 }
             }
+        } finally {
+            completionHandle?.dispose()
         }
 
-        onProgress(downloaded, total, 0L)
+        val finalTotal = if (total > 0L) total else downloaded
+        onProgress(downloaded, finalTotal, 0L)
+        downloadDao.updateTaskProgress(taskId, downloaded, finalTotal, 0L, DownloadStatus.DOWNLOADING)
         targetFile
     }
 
-    private fun probeServer(url: String, referer: String? = null): ProbeResult {
+    private suspend fun probeServer(url: String, referer: String? = null): ProbeResult {
         return try {
+            val ctx = currentCoroutineContext()
             val headReq = Request.Builder()
                 .url(url)
                 .apply {
@@ -276,34 +369,60 @@ class HttpChunkDownloader(
                 }
                 .head()
                 .build()
-            val (length, acceptsRanges, isHeadSuccess) = okHttpClient.newCall(headReq).execute().use { response ->
-                val accepts = response.header("Accept-Ranges")?.equals("bytes", ignoreCase = true) == true ||
+
+            val headCall = okHttpClient.newCall(headReq)
+            val headHandle = ctx[Job]?.invokeOnCompletion { headCall.cancel() }
+
+            val (headLength, headAcceptsRanges, isHeadSuccess) = try {
+                headCall.execute().use { response ->
+                    val accepts = response.header("Accept-Ranges")?.equals("bytes", ignoreCase = true) == true ||
                         response.header("Content-Range") != null
-                val len = response.header("Content-Length")?.toLongOrNull() ?: 0L
-                Triple(len, accepts, response.isSuccessful)
-            }
-
-            if (length > 0 && isHeadSuccess) {
-                ProbeResult(length, acceptsRanges)
-            } else {
-                // If HEAD had no length, probe with a 1-byte range GET
-                val rangeReq = Request.Builder()
-                    .url(url)
-                    .addHeader("Range", "bytes=0-0")
-                    .apply {
-                        if (!referer.isNullOrBlank()) {
-                            addHeader("Referer", referer)
-                        }
-                    }
-                    .build()
-                okHttpClient.newCall(rangeReq).execute().use { rangeResp ->
-                    val rangeHeader = rangeResp.header("Content-Range")
-                    val totalLength = rangeHeader?.substringAfterLast('/')?.toLongOrNull() ?: 0L
-                    val isRangeAccepted = rangeResp.code == 206 || rangeHeader != null
-
-                    ProbeResult(totalLength, isRangeAccepted)
+                    val len = response.header("Content-Length")?.toLongOrNull() ?: 0L
+                    Triple(len, accepts, response.isSuccessful)
                 }
+            } finally {
+                headHandle?.dispose()
             }
+
+            if (isHeadSuccess && headLength > 0L && headAcceptsRanges) {
+                return ProbeResult(headLength, true)
+            }
+
+            // Probe with 1-byte Range GET either to discover Content-Length or verify Range support
+            val rangeReq = Request.Builder()
+                .url(url)
+                .addHeader("Range", "bytes=0-0")
+                .apply {
+                    if (!referer.isNullOrBlank()) {
+                        addHeader("Referer", referer)
+                    }
+                }
+                .build()
+
+            val rangeCall = okHttpClient.newCall(rangeReq)
+            val rangeHandle = ctx[Job]?.invokeOnCompletion { rangeCall.cancel() }
+
+            try {
+                rangeCall.execute().use { rangeResp ->
+                    val rangeHeader = rangeResp.header("Content-Range")
+                    val rangeTotal = rangeHeader?.substringAfterLast('/')?.trim()?.toLongOrNull() ?: 0L
+                    val isRangeAccepted = rangeResp.code == 206 && rangeTotal > 0L
+
+                    if (isRangeAccepted) {
+                        ProbeResult(rangeTotal, true)
+                    } else {
+                        // Server returned 200 OK (ignored Range) — cancel call immediately before closing so body isn't drained
+                        val fallbackLength = (rangeResp.header("Content-Length")?.toLongOrNull() ?: 0L)
+                            .takeIf { it > 0L } ?: headLength
+                        rangeCall.cancel()
+                        ProbeResult(fallbackLength, false)
+                    }
+                }
+            } finally {
+                rangeHandle?.dispose()
+            }
+        } catch (ce: CancellationException) {
+            throw ce
         } catch (_: Exception) {
             ProbeResult(0L, false)
         }
@@ -313,4 +432,12 @@ class HttpChunkDownloader(
         val contentLength: Long,
         val supportsRanges: Boolean
     )
+
+    companion object {
+        private const val IO_BUFFER_SIZE = 64 * 1024
+        private const val MAX_CHUNK_RETRIES = 3
+        private const val RETRY_BASE_DELAY_MS = 500L
+        private const val PROGRESS_TICK_NANOS = 500_000_000L
+        private const val CHUNK_DB_SYNC_INTERVAL_NANOS = 1_000_000_000L
+    }
 }

@@ -13,10 +13,12 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
+import androidx.core.net.toUri
 import androidx.work.ForegroundInfo
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.Locale
 
 object DownloadEngineHelper {
@@ -25,11 +27,12 @@ object DownloadEngineHelper {
     const val COMPLETION_CHANNEL_ID = "udm_completion_channel"
     private const val CHANNEL_NAME = "UDM Active Downloads"
     private const val COMPLETION_CHANNEL_NAME = "UDM Completed Downloads"
+    private const val COPY_BUFFER_BYTES = 64 * 1024
 
     fun ensureNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            
+
             val activeChannel = NotificationChannel(
                 CHANNEL_ID,
                 CHANNEL_NAME,
@@ -113,10 +116,10 @@ object DownloadEngineHelper {
 
         val speedText = formatSpeed(speedBytesPerSec)
         val isAudio = title.endsWith(".mp3", ignoreCase = true) ||
-                title.endsWith(".m4a", ignoreCase = true) ||
-                title.endsWith(".opus", ignoreCase = true) ||
-                title.endsWith(".flac", ignoreCase = true) ||
-                title.endsWith(".wav", ignoreCase = true)
+            title.endsWith(".m4a", ignoreCase = true) ||
+            title.endsWith(".opus", ignoreCase = true) ||
+            title.endsWith(".flac", ignoreCase = true) ||
+            title.endsWith(".wav", ignoreCase = true)
 
         val contentText = when {
             isMuxing && isAudio -> "Encoding High-Fidelity Audio with FFmpeg..."
@@ -146,10 +149,41 @@ object DownloadEngineHelper {
     }
 
     fun formatSpeed(bytesPerSec: Long): String {
+        val safe = bytesPerSec.coerceAtLeast(0L)
         return when {
-            bytesPerSec >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB/s", bytesPerSec.toFloat() / (1024 * 1024))
-            bytesPerSec >= 1024 -> String.format(Locale.US, "%.1f KB/s", bytesPerSec.toFloat() / 1024)
-            else -> "$bytesPerSec B/s"
+            safe >= 1024L * 1024L -> String.format(Locale.US, "%.1f MB/s", safe.toDouble() / (1024.0 * 1024.0))
+            safe >= 1024L -> String.format(Locale.US, "%.1f KB/s", safe.toDouble() / 1024.0)
+            else -> "$safe B/s"
+        }
+    }
+
+    fun sanitizeFileName(rawName: String, fallback: String = "udm_download"): String {
+        val base = rawName
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .replace("..", "_")
+            .replace(Regex("[^a-zA-Z0-9._\\- ]"), "_")
+            .trim()
+            .trimStart('.')
+        return base.ifBlank { fallback }
+    }
+
+    /**
+     * Deletes a saved download target from either MediaStore (`content://`) or filesystem path.
+     */
+    fun deleteSavedFile(context: Context, filePath: String) {
+        if (filePath.isBlank()) return
+        if (filePath.startsWith("content://", ignoreCase = true)) {
+            runCatching {
+                context.contentResolver.delete(filePath.toUri(), null, null)
+            }
+        } else {
+            runCatching {
+                val file = File(filePath)
+                if (file.exists()) {
+                    file.delete()
+                }
+            }
         }
     }
 
@@ -164,11 +198,12 @@ object DownloadEngineHelper {
         mimeType: String
     ): String {
         if (!sourceFile.exists()) return sourceFile.absolutePath
+        val safeFileName = sanitizeFileName(fileName)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
             val contentValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.DISPLAY_NAME, safeFileName)
                 put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
                 put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/UDM")
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
@@ -179,9 +214,11 @@ object DownloadEngineHelper {
 
             if (itemUri != null) {
                 try {
-                    resolver.openOutputStream(itemUri)?.use { outStream ->
+                    val outStream = resolver.openOutputStream(itemUri)
+                        ?: throw IOException("ContentResolver returned null OutputStream for $itemUri")
+                    outStream.use { out ->
                         FileInputStream(sourceFile).use { inStream ->
-                            inStream.copyTo(outStream)
+                            inStream.copyTo(out, COPY_BUFFER_BYTES)
                         }
                     }
                     contentValues.clear()
@@ -192,7 +229,8 @@ object DownloadEngineHelper {
                     sourceFile.delete()
                     return itemUri.toString()
                 } catch (_: Exception) {
-                    // Fallback to local source path on error
+                    // Prevent leaking orphaned IS_PENDING=1 rows in MediaStore
+                    runCatching { resolver.delete(itemUri, null, null) }
                 }
             }
         }
@@ -204,17 +242,17 @@ object DownloadEngineHelper {
         )
         if (!publicDir.exists()) publicDir.mkdirs()
 
-        val destFile = File(publicDir, fileName)
-        try {
+        val destFile = File(publicDir, safeFileName)
+        return try {
             FileInputStream(sourceFile).use { inStream ->
                 FileOutputStream(destFile).use { outStream ->
-                    inStream.copyTo(outStream)
+                    inStream.copyTo(outStream, COPY_BUFFER_BYTES)
                 }
             }
             sourceFile.delete()
-            return destFile.absolutePath
+            destFile.absolutePath
         } catch (_: Exception) {
-            return sourceFile.absolutePath
+            sourceFile.absolutePath
         }
     }
 }

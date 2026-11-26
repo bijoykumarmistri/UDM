@@ -1,21 +1,22 @@
 package com.universal.dm.domain.sniffer
 
-import android.net.Uri
 import android.util.Log
 import android.util.LruCache
+import com.universal.dm.core.NetworkClient
 import com.universal.dm.data.model.AudioCodec
 import com.universal.dm.data.model.DetectedPageMedia
 import com.universal.dm.data.model.MediaType
 import com.universal.dm.data.model.StreamVariant
 import com.universal.dm.data.model.VideoCodec
-import com.universal.dm.core.NetworkClient
 import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.File
+import java.net.URLDecoder
 import java.util.Locale
+import kotlin.math.roundToLong
 
 class MediaSniffer(
     private val okHttpClient: OkHttpClient = NetworkClient.client
@@ -25,94 +26,140 @@ class MediaSniffer(
 
     fun getCachedMedia(url: String): DetectedPageMedia? {
         val cleanUrl = cleanMediaUrl(url)
-        return mediaCache.get(cleanUrl) ?: mediaCache.get(url)
+        return mediaCache.get(cleanUrl) ?: if (cleanUrl != url) mediaCache.get(url) else null
     }
 
-    private val supportedPlatformDomains = listOf(
-        "youtube.com", "youtu.be", "vimeo.com", "dailymotion.com",
-        "tiktok.com", "instagram.com", "twitter.com", "x.com",
-        "facebook.com", "reddit.com", "bilibili.com", "twitch.tv"
+    internal data class UrlParts(
+        val scheme: String,
+        val host: String,
+        val path: String,
+        val query: String
     )
 
-    private val mediaExtensions = setOf(
-        "mp4", "mkv", "webm", "m4v", "avi", "mov", "flv", "3gp",
-        "m4a", "mp3", "opus", "flac", "wav", "aac", "ogg",
-        "m3u8", "mpd",
-        "zip", "apk", "xapk", "apks", "pdf", "iso", "tar", "gz", "7z", "rar", "bz2", "xz",
-        "exe", "dmg", "bin", "deb", "rpm", "msi", "torrent",
-        "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt"
-    )
+    internal fun parseUrlParts(rawUrl: String): UrlParts? {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isEmpty()) return null
+        val schemeIdx = trimmed.indexOf("://")
+        if (schemeIdx <= 0) return null
+        val scheme = trimmed.substring(0, schemeIdx).lowercase(Locale.ROOT)
+        if (scheme != "http" && scheme != "https") return null
 
-    private val directFileExtensions = setOf(
-        "zip", "apk", "xapk", "apks", "pdf", "iso", "tar", "gz", "7z", "rar", "bz2", "xz",
-        "exe", "dmg", "bin", "deb", "rpm", "msi", "torrent",
-        "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt"
-    )
+        val afterScheme = trimmed.substring(schemeIdx + 3)
+        val fragIdx = afterScheme.indexOf('#')
+        val withoutFrag = if (fragIdx >= 0) afterScheme.substring(0, fragIdx) else afterScheme
+
+        val queryIdx = withoutFrag.indexOf('?')
+        val authorityAndPath = if (queryIdx >= 0) withoutFrag.substring(0, queryIdx) else withoutFrag
+        val query = if (queryIdx >= 0) withoutFrag.substring(queryIdx + 1) else ""
+
+        val slashIdx = authorityAndPath.indexOf('/')
+        val rawAuthority = if (slashIdx >= 0) authorityAndPath.substring(0, slashIdx) else authorityAndPath
+        val path = if (slashIdx >= 0) authorityAndPath.substring(slashIdx) else ""
+
+        // Strip optional userinfo (`user@host`) and port (`host:8080`)
+        val withoutUserInfo = rawAuthority.substringAfterLast('@')
+        val host = if (withoutUserInfo.startsWith('[')) {
+            withoutUserInfo.substringBefore(']') + "]"
+        } else {
+            withoutUserInfo.substringBefore(':')
+        }.lowercase(Locale.ROOT).trimEnd('.')
+
+        if (host.isEmpty()) return null
+        return UrlParts(scheme = scheme, host = host, path = path, query = query)
+    }
+
+    internal fun hostMatchesDomain(host: String, domain: String): Boolean {
+        return host == domain || host.endsWith(".$domain")
+    }
+
+    private fun extractYoutubeVideoIdParam(query: String): String? {
+        if (query.isEmpty()) return null
+        var start = 0
+        while (start < query.length) {
+            val amp = query.indexOf('&', start)
+            val pair = if (amp >= 0) query.substring(start, amp) else query.substring(start)
+            val eq = pair.indexOf('=')
+            if (eq == 1 && pair[0] == 'v') {
+                return pair.substring(2).takeIf { it.isNotBlank() }
+            }
+            if (amp < 0) break
+            start = amp + 1
+        }
+        return null
+    }
 
     fun isDirectFileExtension(url: String): Boolean {
-        val path = runCatching { Uri.parse(url).path }.getOrNull()?.lowercase(Locale.ROOT) ?: ""
-        val ext = path.substringAfterLast('.', "")
+        val path = parseUrlParts(url)?.path?.lowercase(Locale.ROOT) ?: return false
+        val fileName = path.substringAfterLast('/', "")
+        val ext = fileName.substringAfterLast('.', "")
         return directFileExtensions.contains(ext)
     }
 
     fun isSupportedPlatformUrl(url: String): Boolean {
-        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
-        val host = uri.host?.lowercase(Locale.ROOT) ?: ""
-        return supportedPlatformDomains.any { host.contains(it) }
+        val host = parseUrlParts(url)?.host ?: return false
+        return supportedPlatformDomains.any { hostMatchesDomain(host, it) }
     }
 
     fun isMediaOrDownloadableUrl(url: String): Boolean {
-        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
-        val host = uri.host?.lowercase(Locale.ROOT) ?: ""
-        val path = uri.path?.lowercase(Locale.ROOT) ?: ""
+        val parts = parseUrlParts(url) ?: return false
+        val host = parts.host
+        val path = parts.path.lowercase(Locale.ROOT)
 
         // Filter out API, telemetry, analytics, and internal sub-requests
         if (path.contains("/api/") || path.contains("/youtubei/") || path.contains("/stats/") ||
-            path.contains("/ptracking") || path.contains("/gen_204") || path.contains("/log_event")) {
+            path.contains("/ptracking") || path.contains("/gen_204") || path.contains("/log_event")
+        ) {
             return false
         }
 
-        if (supportedPlatformDomains.any { host.contains(it) }) {
+        if (supportedPlatformDomains.any { hostMatchesDomain(host, it) }) {
             return when {
-                host.contains("youtube.com") -> {
+                hostMatchesDomain(host, "youtube.com") -> {
                     path.contains("/watch") || path.contains("/shorts") || path.contains("/live") || path.contains("/embed")
                 }
-                host.contains("youtu.be") -> path.length > 1
-                host.contains("tiktok.com") -> path.contains("/video/") || path.contains("/@")
-                host.contains("instagram.com") -> path.contains("/p/") || path.contains("/reel/") || path.contains("/tv/")
-                host.contains("twitter.com") || host.contains("x.com") -> path.contains("/status/")
-                host.contains("facebook.com") -> path.contains("/watch") || path.contains("/videos/") || path.contains("/reel/")
-                host.contains("reddit.com") -> path.contains("/comments/")
-                host.contains("vimeo.com") || host.contains("dailymotion.com") -> {
+                hostMatchesDomain(host, "youtu.be") -> path.length > 1
+                hostMatchesDomain(host, "tiktok.com") -> path.contains("/video/") || path.contains("/@")
+                hostMatchesDomain(host, "instagram.com") -> path.contains("/p/") || path.contains("/reel/") || path.contains("/tv/")
+                hostMatchesDomain(host, "twitter.com") || hostMatchesDomain(host, "x.com") -> path.contains("/status/")
+                hostMatchesDomain(host, "facebook.com") -> path.contains("/watch") || path.contains("/videos/") || path.contains("/reel/")
+                hostMatchesDomain(host, "reddit.com") -> path.contains("/comments/")
+                hostMatchesDomain(host, "vimeo.com") || hostMatchesDomain(host, "dailymotion.com") -> {
                     path.length > 3 && !path.startsWith("/home") && !path.startsWith("/feed")
                 }
                 else -> path.contains("/video") || path.contains("/watch")
             }
         }
 
-        val ext = path.substringAfterLast('.', "")
+        val fileName = path.substringAfterLast('/', "")
+        val ext = fileName.substringAfterLast('.', "")
         return mediaExtensions.contains(ext)
     }
 
     fun cleanMediaUrl(rawUrl: String): String {
-        val uri = runCatching { Uri.parse(rawUrl) }.getOrNull() ?: return rawUrl
-        val host = uri.host?.lowercase(Locale.ROOT) ?: ""
-        if (host.contains("youtube.com") || host.contains("youtu.be")) {
-            val videoId = uri.getQueryParameter("v")
+        val parts = parseUrlParts(rawUrl) ?: return rawUrl
+        val host = parts.host
+        if (hostMatchesDomain(host, "youtube.com") || hostMatchesDomain(host, "youtu.be")) {
+            val videoId = extractYoutubeVideoIdParam(parts.query)
             if (!videoId.isNullOrBlank()) {
                 return "https://www.youtube.com/watch?v=$videoId"
             }
-            if (host.contains("youtu.be")) {
-                val id = uri.pathSegments.firstOrNull()
-                if (!id.isNullOrBlank()) {
+            if (hostMatchesDomain(host, "youtu.be")) {
+                val id = parts.path.trimStart('/').substringBefore('/')
+                if (id.isNotBlank()) {
                     return "https://www.youtube.com/watch?v=$id"
                 }
             }
-            val path = uri.path ?: ""
-            if (path.contains("/shorts/")) {
-                val shortId = path.substringAfter("/shorts/").substringBefore('/')
-                if (shortId.isNotBlank()) {
-                    return "https://www.youtube.com/watch?v=$shortId"
+            val path = parts.path
+            val marker = when {
+                path.contains("/shorts/") -> "/shorts/"
+                path.contains("/live/") -> "/live/"
+                path.contains("/embed/") -> "/embed/"
+                else -> null
+            }
+            if (marker != null) {
+                val extractedId = path.substringAfter(marker).substringBefore('/').substringBefore('?')
+                if (extractedId.isNotBlank()) {
+                    return "https://www.youtube.com/watch?v=$extractedId"
                 }
             }
         }
@@ -121,7 +168,7 @@ class MediaSniffer(
 
     /**
      * Extracts full media metadata, streaming formats, and direct files using YoutubeDL
-     * with an OkHttp HEAD request fallback.
+     * with an OkHttp HEAD/Range request fallback.
      */
     suspend fun extractMedia(url: String, fallbackTitle: String? = null): DetectedPageMedia? =
         withContext(Dispatchers.IO) {
@@ -129,9 +176,9 @@ class MediaSniffer(
 
             // Cache hit check (0ms return for visited / already extracted videos or files)
             getCachedMedia(cleanUrl)?.let { return@withContext it }
-            getCachedMedia(url)?.let { return@withContext it }
 
-            val isYouTube = cleanUrl.contains("youtube.com", ignoreCase = true) || cleanUrl.contains("youtu.be", ignoreCase = true)
+            val cleanHost = parseUrlParts(cleanUrl)?.host ?: ""
+            val isYouTube = hostMatchesDomain(cleanHost, "youtube.com") || hostMatchesDomain(cleanHost, "youtu.be")
 
             // Fast-track: Direct files (apps, zip, pdf, docs, binaries) bypass yt-dlp entirely
             if (!isYouTube && isDirectFileExtension(cleanUrl)) {
@@ -142,7 +189,7 @@ class MediaSniffer(
                 com.universal.dm.UdmApplication.ensureYoutubeDlInitialized(com.universal.dm.UdmApplication.instance)
 
                 // 1. Primary attempt: Native yt-dlp extractor (clean metadata and full multi-codec streams)
-                val request = com.yausername.youtubedl_android.YoutubeDLRequest(cleanUrl).apply {
+                val request = YoutubeDLRequest(cleanUrl).apply {
                     addOption("--no-playlist")
                     addOption("--no-warnings")
                     addOption("--no-check-certificates")
@@ -167,25 +214,25 @@ class MediaSniffer(
                         android.webkit.CookieManager.getInstance().getCookie("https://www.youtube.com")
                     }.getOrNull()
 
-                    val fallbackRequest = com.yausername.youtubedl_android.YoutubeDLRequest(cleanUrl).apply {
-                        addOption("--no-playlist")
-                        addOption("--no-warnings")
-                        addOption("--no-check-certificates")
-                        addOption("--geo-bypass")
-                        addOption("--skip-download")
-                        addOption("--no-call-home")
-                        addOption("--socket-timeout", "10")
-                        addOption("--extractor-args", "youtube:skip=translated_subs")
-                        if (!cookies.isNullOrBlank()) {
+                    if (!cookies.isNullOrBlank()) {
+                        val fallbackRequest = YoutubeDLRequest(cleanUrl).apply {
+                            addOption("--no-playlist")
+                            addOption("--no-warnings")
+                            addOption("--no-check-certificates")
+                            addOption("--geo-bypass")
+                            addOption("--skip-download")
+                            addOption("--no-call-home")
+                            addOption("--socket-timeout", "10")
+                            addOption("--extractor-args", "youtube:skip=translated_subs")
                             addOption("--add-header", "Cookie: $cookies")
                         }
-                    }
 
-                    videoInfo = runCatching {
-                        YoutubeDL.getInstance().getInfo(fallbackRequest)
-                    }.onFailure {
-                        Log.e(TAG, "All YoutubeDL extraction attempts failed for $cleanUrl", it)
-                    }.getOrNull()
+                        videoInfo = runCatching {
+                            YoutubeDL.getInstance().getInfo(fallbackRequest)
+                        }.onFailure {
+                            Log.e(TAG, "Cookie-backed YoutubeDL extraction failed for $cleanUrl", it)
+                        }.getOrNull()
+                    }
                 }
 
                 Log.d(TAG, "Extraction result for $cleanUrl: videoInfo != null: ${videoInfo != null}, formats=${videoInfo?.formats?.size ?: 0}")
@@ -205,7 +252,7 @@ class MediaSniffer(
 
                         // Ignore storyboard thumbnail frame spritesheets (sb0-sb3, ext=mhtml, or tracks with no audio and no video)
                         val isStoryboard = format.formatId?.startsWith("sb") == true || ext == "mhtml" ||
-                                ((vcodec == null || vcodec == "none") && (acodec == null || acodec == "none"))
+                            ((vcodec == null || vcodec == "none") && (acodec == null || acodec == "none"))
                         if (isStoryboard) return@forEachIndexed
 
                         val formatUrl = format.url ?: format.manifestUrl ?: cleanUrl
@@ -213,11 +260,11 @@ class MediaSniffer(
                         val parsedHeight = if (format.height > 0) {
                             format.height
                         } else {
-                            Regex("(\\d{3,4})p?").find(format.formatNote ?: "")?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                            HEIGHT_NOTE_REGEX.find(format.formatNote ?: "")?.groupValues?.get(1)?.toIntOrNull() ?: 0
                         }
 
                         val isAudioOnly = (vcodec == null || vcodec == "none" || parsedHeight <= 0) &&
-                                (acodec != null && acodec != "none")
+                            (acodec != null && acodec != "none")
                         val isVideo = (vcodec != null && vcodec != "none") || parsedHeight > 0
 
                         if (index < 10) {
@@ -226,14 +273,14 @@ class MediaSniffer(
 
                         val mappedVideoCodec = when {
                             vcodec?.startsWith("av01") == true -> VideoCodec.AV1
-                            vcodec?.startsWith("avc1") == true -> VideoCodec.H264
-                            vcodec?.startsWith("vp9") == true || vcodec?.startsWith("vp09") == true -> VideoCodec.VP9
+                            vcodec?.startsWith("avc1") == true || vcodec?.startsWith("h264") == true -> VideoCodec.H264
+                            vcodec?.startsWith("vp9") == true || vcodec?.startsWith("vp09") == true || vcodec?.startsWith("vp8") == true -> VideoCodec.VP9
                             isVideo -> VideoCodec.OTHER
                             else -> null
                         }
 
                         val mappedAudioCodec = when {
-                            acodec?.startsWith("mp4a") == true -> AudioCodec.M4A
+                            acodec?.startsWith("mp4a") == true || acodec?.startsWith("aac") == true -> AudioCodec.M4A
                             acodec?.startsWith("opus") == true -> AudioCodec.OPUS
                             acodec?.startsWith("mp3") == true -> AudioCodec.MP3
                             else -> null
@@ -243,14 +290,16 @@ class MediaSniffer(
                         var fileSize = when {
                             format.fileSize > 0 -> format.fileSize
                             format.fileSizeApproximate > 0 -> format.fileSizeApproximate
-                            format.tbr > 0 && duration != null && duration > 0 -> (format.tbr * 1000L * duration) / 8L
-                            format.abr > 0 && duration != null && duration > 0 -> (format.abr * 1000L * duration) / 8L
+                            format.tbr > 0 && duration != null && duration > 0 ->
+                                ((format.tbr.toDouble() * 1000.0 * duration) / 8.0).roundToLong()
+                            format.abr > 0 && duration != null && duration > 0 ->
+                                ((format.abr.toDouble() * 1000.0 * duration) / 8.0).roundToLong()
                             else -> 0L
                         }
 
                         if (isAudioOnly) {
+                            val rateKbps = if (format.abr > 0) format.abr else if (format.tbr > 0) format.tbr else 128
                             if (fileSize <= 0) {
-                                val rateKbps = if (format.abr > 0) format.abr else if (format.tbr > 0) format.tbr else 128
                                 fileSize = MediaSizeCalculator.calculateAudioTotalBytes(
                                     targetBitrateKbps = rateKbps,
                                     codec = mappedAudioCodec,
@@ -269,7 +318,7 @@ class MediaSniffer(
                                     mediaType = MediaType.AUDIO,
                                     qualityLabel = qualityLabel,
                                     resolutionHeight = 0,
-                                    bitrateKbps = if (format.abr > 0) format.abr else format.tbr,
+                                    bitrateKbps = rateKbps,
                                     videoCodec = null,
                                     audioCodec = mappedAudioCodec ?: AudioCodec.M4A,
                                     containerExt = ext,
@@ -279,7 +328,8 @@ class MediaSniffer(
                             )
                         } else if (isVideo) {
                             val requiresAudio = acodec == null || acodec == "none"
-                            val qualityLabel = (if (parsedHeight > 0) "${parsedHeight}p" else "Video") + (if (format.fps > 30) " ${format.fps}fps" else "")
+                            val qualityLabel = (if (parsedHeight > 0) "${parsedHeight}p" else "Video") +
+                                (if (format.fps > 30) " ${format.fps}fps" else "")
 
                             videoVariants.add(
                                 StreamVariant(
@@ -299,18 +349,45 @@ class MediaSniffer(
                         }
                     }
 
-                    // Pair video streams requiring audio merge with the highest quality M4A or audio stream,
-                    // and mathematically add the audio stream bytes to video fileSizeBytes so that the total
-                    // reflects the complete merged download size!
-                    val bestAudio = audioVariants.maxByOrNull { it.bitrateKbps }
-                    val finalVideoVariants = videoVariants.map { variant ->
-                        val pairedAudioSize = if (variant.requiresAudioMerge && bestAudio != null) {
-                            if (bestAudio.fileSizeBytes > 0) {
-                                bestAudio.fileSizeBytes
+                    // Deduplicate audio variants by (audioCodec, bitrateKbps), preserving largest known file size
+                    val dedupedAudioVariants = audioVariants
+                        .groupBy { Pair(it.audioCodec, it.bitrateKbps) }
+                        .values
+                        .map { group -> group.maxByOrNull { it.fileSizeBytes } ?: group.first() }
+                        .sortedByDescending { it.bitrateKbps }
+
+                    val bestM4aAudio = dedupedAudioVariants
+                        .filter { it.audioCodec == AudioCodec.M4A }
+                        .maxByOrNull { it.bitrateKbps }
+                    val bestAnyAudio = dedupedAudioVariants.maxByOrNull { it.bitrateKbps }
+
+                    // Deduplicate video variants by (resolutionHeight, videoCodec, qualityLabel), preferring higher bitrate/size
+                    val dedupedVideoVariants = videoVariants
+                        .groupBy { Triple(it.resolutionHeight, it.videoCodec, it.qualityLabel) }
+                        .values
+                        .map { group ->
+                            group.maxWithOrNull(
+                                compareBy<StreamVariant> { it.bitrateKbps }
+                                    .thenBy { it.fileSizeBytes }
+                                    .thenBy { !it.requiresAudioMerge }
+                            ) ?: group.first()
+                        }
+
+                    val finalVideoVariants = dedupedVideoVariants.map { variant ->
+                        val pairedAudio = if (variant.requiresAudioMerge) {
+                            when (variant.videoCodec) {
+                                VideoCodec.AV1, VideoCodec.H264 -> bestM4aAudio ?: bestAnyAudio
+                                else -> bestAnyAudio ?: bestM4aAudio
+                            }
+                        } else null
+
+                        val pairedAudioSize = if (variant.requiresAudioMerge && pairedAudio != null) {
+                            if (pairedAudio.fileSizeBytes > 0) {
+                                pairedAudio.fileSizeBytes
                             } else {
                                 MediaSizeCalculator.calculateAudioTotalBytes(
-                                    targetBitrateKbps = bestAudio.bitrateKbps.coerceAtLeast(128),
-                                    codec = bestAudio.audioCodec,
+                                    targetBitrateKbps = pairedAudio.bitrateKbps.coerceAtLeast(128),
+                                    codec = pairedAudio.audioCodec,
                                     durationSeconds = duration
                                 )
                             }
@@ -329,32 +406,34 @@ class MediaSniffer(
                             )
                         }
 
-                        if (variant.requiresAudioMerge && bestAudio != null) {
+                        if (variant.requiresAudioMerge && pairedAudio != null) {
                             variant.copy(
-                                pairedAudioStreamUrl = bestAudio.url,
-                                pairedAudioFormatId = bestAudio.formatId,
+                                pairedAudioStreamUrl = pairedAudio.url,
+                                pairedAudioFormatId = pairedAudio.formatId,
                                 fileSizeBytes = totalSize
                             )
                         } else {
                             variant.copy(fileSizeBytes = totalSize)
                         }
-                    }.sortedByDescending { it.resolutionHeight }
+                    }.sortedWith(
+                        compareByDescending<StreamVariant> { it.resolutionHeight }
+                            .thenByDescending { it.bitrateKbps }
+                            .thenByDescending { it.fileSizeBytes }
+                    )
 
-                    val sortedAudioVariants = audioVariants.sortedByDescending { it.bitrateKbps }
+                    Log.d(TAG, "Processed variants for $url: video=${finalVideoVariants.size}, audio=${dedupedAudioVariants.size}")
 
-                    Log.d(TAG, "Processed variants for $url: video=${finalVideoVariants.size}, audio=${sortedAudioVariants.size}")
-
-                    if (finalVideoVariants.isNotEmpty() || sortedAudioVariants.isNotEmpty()) {
+                    if (finalVideoVariants.isNotEmpty() || dedupedAudioVariants.isNotEmpty()) {
                         val media = DetectedPageMedia(
                             pageTitle = title,
                             pageUrl = url,
                             thumbnailUrl = thumbnail,
                             durationSeconds = duration,
                             videoVariants = finalVideoVariants,
-                            audioVariants = sortedAudioVariants
+                            audioVariants = dedupedAudioVariants
                         )
                         mediaCache.put(cleanUrl, media)
-                        mediaCache.put(url, media)
+                        if (cleanUrl != url) mediaCache.put(url, media)
                         return@withContext media
                     }
                 }
@@ -370,37 +449,51 @@ class MediaSniffer(
     private fun extractDirectFileMedia(url: String, fallbackTitle: String?): DetectedPageMedia? {
         val cleanUrl = cleanMediaUrl(url)
         getCachedMedia(cleanUrl)?.let { return it }
-        getCachedMedia(url)?.let { return it }
 
-        val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        val request = Request.Builder()
+        val headReq = Request.Builder()
             .url(url)
-            .header("User-Agent", userAgent)
             .head()
             .build()
 
         return runCatching {
-            var response = okHttpClient.newCall(request).execute()
+            val headCall = okHttpClient.newCall(headReq)
+            var activeCall = headCall
+            var response = headCall.execute()
+
             if (!response.isSuccessful || response.code == 405) {
                 response.close()
                 val getReq = Request.Builder()
                     .url(url)
-                    .header("User-Agent", userAgent)
                     .header("Range", "bytes=0-0")
                     .build()
-                response = okHttpClient.newCall(getReq).execute()
+                activeCall = okHttpClient.newCall(getReq)
+                response = activeCall.execute()
             }
 
             response.use { resp ->
-                if (!resp.isSuccessful && resp.code != 206) return null
+                if (!resp.isSuccessful && resp.code != 206) {
+                    return null
+                }
 
                 val contentRange = resp.header("Content-Range")
-                val contentLength = resp.header("Content-Length")?.toLongOrNull()
-                    ?: (if (contentRange != null && contentRange.contains("/")) {
-                        contentRange.substringAfterLast("/").trim().toLongOrNull() ?: 0L
-                    } else 0L)
+                val rangeTotal = if (contentRange != null && contentRange.contains("/")) {
+                    contentRange.substringAfterLast("/").trim().toLongOrNull() ?: 0L
+                } else 0L
+
+                // On HTTP 206 Range bytes=0-0, Content-Length is 1; total file size comes from Content-Range!
+                val contentLength = if (resp.code == 206 && rangeTotal > 0L) {
+                    rangeTotal
+                } else {
+                    (resp.header("Content-Length")?.toLongOrNull() ?: 0L).takeIf { it > 0L } ?: rangeTotal
+                }
+
                 val contentType = resp.header("Content-Type")?.lowercase(Locale.ROOT) ?: ""
                 val contentDisposition = resp.header("Content-Disposition") ?: ""
+
+                // If Range was ignored (200 OK on GET fallback), cancel call immediately so body isn't drained over network
+                if (resp.code == 200 && resp.request.method == "GET") {
+                    activeCall.cancel()
+                }
 
                 // Extract filename cleanly
                 val rawFilename = if (contentDisposition.contains("filename*=", ignoreCase = true)) {
@@ -408,15 +501,21 @@ class MediaSniffer(
                 } else if (contentDisposition.contains("filename=", ignoreCase = true)) {
                     contentDisposition.substringAfter("filename=").substringBefore(";").replace("\"", "").trim()
                 } else {
-                    File(Uri.parse(url).path ?: "").name.ifEmpty { fallbackTitle ?: "downloaded_file" }
+                    val pathName = parseUrlParts(url)?.path?.substringAfterLast('/') ?: ""
+                    pathName.ifEmpty { fallbackTitle ?: "downloaded_file" }
                 }
 
-                val decodedFilename = runCatching { java.net.URLDecoder.decode(rawFilename, "UTF-8") }.getOrDefault(rawFilename)
-                val cleanFilename = decodedFilename.replace(Regex("[^a-zA-Z0-9._\\- ]"), "_").trim()
+                val decodedFilename = runCatching { URLDecoder.decode(rawFilename, "UTF-8") }.getOrDefault(rawFilename)
+                val cleanFilename = decodedFilename
+                    .replace("..", "_")
+                    .replace(SANITIZE_FILENAME_REGEX, "_")
+                    .trim()
+                    .trimStart('.')
 
                 var ext = cleanFilename.substringAfterLast('.', "").lowercase(Locale.ROOT)
                 if (ext.isEmpty() || ext.length > 5 || ext == cleanFilename.lowercase(Locale.ROOT)) {
-                    val guessedExt = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(contentType)
+                    val mimeWithoutParams = contentType.substringBefore(';').trim()
+                    val guessedExt = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeWithoutParams)
                     if (!guessedExt.isNullOrEmpty()) {
                         ext = guessedExt.lowercase(Locale.ROOT)
                     }
@@ -424,22 +523,24 @@ class MediaSniffer(
 
                 // Filter out standard non-media HTML web pages, scripts, and stylesheets
                 val isHtmlOrWebPage = (contentType.contains("text/html") ||
-                        contentType.contains("application/xhtml") ||
-                        ext in listOf("html", "htm", "php", "jsp", "asp", "aspx", "js", "css")) &&
-                        !contentDisposition.contains("attachment", ignoreCase = true)
+                    contentType.contains("application/xhtml") ||
+                    ext in listOf("html", "htm", "php", "jsp", "asp", "aspx", "js", "css")) &&
+                    !contentDisposition.contains("attachment", ignoreCase = true)
 
                 if (isHtmlOrWebPage) {
                     return null
                 }
 
                 val isHlsOrDash = ext in listOf("m3u8", "mpd") ||
-                        contentType.contains("mpegurl") ||
-                        contentType.contains("dash+xml") ||
-                        url.contains(".m3u8", ignoreCase = true) ||
-                        url.contains(".mpd", ignoreCase = true)
+                    contentType.contains("mpegurl") ||
+                    contentType.contains("dash+xml") ||
+                    url.contains(".m3u8", ignoreCase = true) ||
+                    url.contains(".mpd", ignoreCase = true)
 
-                val isVideo = isHlsOrDash || contentType.startsWith("video/") || ext in listOf("mp4", "mkv", "webm", "avi", "mov", "m4v", "flv", "3gp")
-                val isAudio = !isVideo && (contentType.startsWith("audio/") || ext in listOf("mp3", "m4a", "opus", "wav", "flac", "aac", "ogg"))
+                val isVideo = isHlsOrDash || contentType.startsWith("video/") ||
+                    ext in listOf("mp4", "mkv", "webm", "avi", "mov", "m4v", "flv", "3gp")
+                val isAudio = !isVideo && (contentType.startsWith("audio/") ||
+                    ext in listOf("mp3", "m4a", "opus", "wav", "flac", "aac", "ogg"))
                 val isDirectFile = !isVideo && !isAudio
 
                 val mediaType = when {
@@ -454,11 +555,11 @@ class MediaSniffer(
                     isVideo -> "Direct Video"
                     isAudio -> "Direct Audio"
                     ext in listOf("apk", "xapk", "apks") -> "Android App (APK)"
-                    ext in listOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz") -> "${ext.uppercase()} Archive"
+                    ext in listOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz") -> "${ext.uppercase(Locale.ROOT)} Archive"
                     ext == "pdf" -> "PDF Document"
                     ext in listOf("doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt") -> "Office Document"
                     ext in listOf("iso", "dmg", "exe", "msi", "bin", "deb", "rpm") -> "Binary / Installer"
-                    ext.isNotEmpty() -> "${ext.uppercase()} File"
+                    ext.isNotEmpty() -> "${ext.uppercase(Locale.ROOT)} File"
                     else -> "Direct File"
                 }
 
@@ -512,7 +613,7 @@ class MediaSniffer(
                     directFileVariant = if (isDirectFile) singleVariant else null
                 )
                 mediaCache.put(cleanUrl, directMedia)
-                mediaCache.put(url, directMedia)
+                if (cleanUrl != url) mediaCache.put(url, directMedia)
                 directMedia
             }
         }.getOrNull()
@@ -520,6 +621,29 @@ class MediaSniffer(
 
     companion object {
         private const val TAG = "MediaSniffer"
+        private val HEIGHT_NOTE_REGEX = Regex("(\\d{3,4})p?")
+        private val SANITIZE_FILENAME_REGEX = Regex("[^a-zA-Z0-9._\\- ]")
+
+        private val supportedPlatformDomains = listOf(
+            "youtube.com", "youtu.be", "vimeo.com", "dailymotion.com",
+            "tiktok.com", "instagram.com", "twitter.com", "x.com",
+            "facebook.com", "reddit.com", "bilibili.com", "twitch.tv"
+        )
+
+        private val mediaExtensions = setOf(
+            "mp4", "mkv", "webm", "m4v", "avi", "mov", "flv", "3gp",
+            "m4a", "mp3", "opus", "flac", "wav", "aac", "ogg",
+            "m3u8", "mpd",
+            "zip", "apk", "xapk", "apks", "pdf", "iso", "tar", "gz", "7z", "rar", "bz2", "xz",
+            "exe", "dmg", "bin", "deb", "rpm", "msi", "torrent",
+            "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt"
+        )
+
+        private val directFileExtensions = setOf(
+            "zip", "apk", "xapk", "apks", "pdf", "iso", "tar", "gz", "7z", "rar", "bz2", "xz",
+            "exe", "dmg", "bin", "deb", "rpm", "msi", "torrent",
+            "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt"
+        )
 
         val JS_MEDIA_SCANNER = """
             (function() {
@@ -545,21 +669,22 @@ class MediaSniffer(
                         }
                     });
 
-                    // Capture dynamic media playback on any website
                     var origPlay = HTMLMediaElement.prototype.play;
                     HTMLMediaElement.prototype.play = function() {
                         var mediaSrc = this.currentSrc || this.src;
-                        if (mediaSrc && mediaSrc.startsWith('http') && window.UdmMediaBridge && window.UdmMediaBridge.onMediaFound) {
+                        if (mediaSrc && mediaSrc.indexOf('http') === 0 && window.UdmMediaBridge && window.UdmMediaBridge.onMediaFound) {
                             window.UdmMediaBridge.onMediaFound(mediaSrc);
                         }
                         return origPlay.apply(this, arguments);
                     };
                 }
-                var mediaElements = document.querySelectorAll('video, audio, source');
-                for (var i = 0; i < mediaElements.length; i++) {
-                    var src = mediaElements[i].currentSrc || mediaElements[i].src;
-                    if (src && src.startsWith('http') && window.UdmMediaBridge && window.UdmMediaBridge.onMediaFound) {
-                        window.UdmMediaBridge.onMediaFound(src);
+                if (window.UdmMediaBridge && window.UdmMediaBridge.onMediaFound) {
+                    var mediaElements = document.querySelectorAll('video, audio, source');
+                    for (var i = 0; i < mediaElements.length; i++) {
+                        var src = mediaElements[i].currentSrc || mediaElements[i].src;
+                        if (src && src.indexOf('http') === 0) {
+                            window.UdmMediaBridge.onMediaFound(src);
+                        }
                     }
                 }
             })();

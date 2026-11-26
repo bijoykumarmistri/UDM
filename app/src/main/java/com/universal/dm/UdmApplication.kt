@@ -6,7 +6,9 @@ import android.util.Log
 import com.universal.dm.data.local.DownloadDatabase
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -22,9 +24,9 @@ class UdmApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        // Pre-warm YoutubeDL and FFmpeg asynchronously on IO dispatcher so media extraction
+        // Pre-warm YoutubeDL and FFmpeg asynchronously on appScope so media extraction
         // executes instantly with 0 cold-start initialization latency when a video is loaded.
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+        appScope.launch {
             ensureYoutubeDlInitialized(this@UdmApplication)
         }
     }
@@ -33,6 +35,12 @@ class UdmApplication : Application() {
         private const val TAG = "UdmApplication"
         private val isYoutubeDlInitialized = AtomicBoolean(false)
         private val youtubeDlMutex = Mutex()
+
+        /**
+         * Application-scoped supervisor coroutine scope for background initialization,
+         * settings propagation, and non-UI async work without leaking per-call scopes.
+         */
+        val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         lateinit var instance: UdmApplication
             private set
@@ -47,11 +55,24 @@ class UdmApplication : Application() {
                             YoutubeDL.getInstance().init(appContext)
                             FFmpeg.getInstance().init(appContext)
                             isYoutubeDlInitialized.set(true)
-                            Log.d(TAG, "YoutubeDL and FFmpeg initialized successfully, version: ${runCatching { YoutubeDL.getInstance().version(appContext) }.getOrNull()}")
-                            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                            Log.d(
+                                TAG,
+                                "YoutubeDL and FFmpeg initialized successfully, version: ${
+                                    runCatching { YoutubeDL.getInstance().version(appContext) }.getOrNull()
+                                }"
+                            )
+                            appScope.launch {
                                 runCatching {
-                                    val status = YoutubeDL.getInstance().updateYoutubeDL(appContext, YoutubeDL.UpdateChannel.NIGHTLY)
-                                    Log.d(TAG, "Background yt-dlp update status: $status, version: ${YoutubeDL.getInstance().version(appContext)}")
+                                    val status = YoutubeDL.getInstance().updateYoutubeDL(
+                                        appContext,
+                                        YoutubeDL.UpdateChannel.NIGHTLY
+                                    )
+                                    Log.d(
+                                        TAG,
+                                        "Background yt-dlp update status: $status, version: ${
+                                            runCatching { YoutubeDL.getInstance().version(appContext) }.getOrNull()
+                                        }"
+                                    )
                                 }
                             }
                         } catch (e: Exception) {
@@ -62,12 +83,20 @@ class UdmApplication : Application() {
             }
         }
 
-        suspend fun updateYoutubeDl(context: Context, channel: YoutubeDL.UpdateChannel = YoutubeDL.UpdateChannel.NIGHTLY): YoutubeDL.UpdateStatus? {
+        suspend fun updateYoutubeDl(
+            context: Context,
+            channel: YoutubeDL.UpdateChannel = YoutubeDL.UpdateChannel.NIGHTLY
+        ): YoutubeDL.UpdateStatus? {
             return withContext(Dispatchers.IO) {
                 try {
                     val appContext = context.applicationContext
                     val status = YoutubeDL.getInstance().updateYoutubeDL(appContext, channel)
-                    Log.d(TAG, "YoutubeDL update status: $status, current version: ${YoutubeDL.getInstance().version(appContext)}")
+                    Log.d(
+                        TAG,
+                        "YoutubeDL update status: $status, current version: ${
+                            runCatching { YoutubeDL.getInstance().version(appContext) }.getOrNull()
+                        }"
+                    )
                     status
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to update YoutubeDL", e)

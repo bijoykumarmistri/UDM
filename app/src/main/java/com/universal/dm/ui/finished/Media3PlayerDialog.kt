@@ -50,8 +50,6 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.universal.dm.data.local.DownloadTaskEntity
 import com.universal.dm.data.model.MediaType
-import com.universal.dm.ui.theme.CodecAv1Badge
-import com.universal.dm.ui.theme.CodecM4aBadge
 import java.io.File
 
 @OptIn(UnstableApi::class)
@@ -93,8 +91,8 @@ fun Media3PlayerDialog(
     }
 
     val codecColor = when {
-        task.codecLabel.contains("AV1", ignoreCase = true) -> CodecAv1Badge
-        task.codecLabel.contains("M4A", ignoreCase = true) -> CodecM4aBadge
+        task.codecLabel.contains("AV1", ignoreCase = true) -> MaterialTheme.colorScheme.tertiary
+        task.codecLabel.contains("M4A", ignoreCase = true) -> MaterialTheme.colorScheme.secondary
         else -> MaterialTheme.colorScheme.primary
     }
 
@@ -143,45 +141,56 @@ fun Media3PlayerDialog(
                         text = task.fileName.ifEmpty { task.title },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
 
                 IconButton(onClick = onDismiss) {
-                    Icon(imageVector = Icons.Default.Close, contentDescription = "Close Player")
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close Player",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
-            // ExoPlayer Video / Audio Surface Container
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(if (task.mediaType == MediaType.AUDIO) 2.2f else 16f / 9f),
-                shape = MaterialTheme.shapes.large,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            // ExoPlayer Video / Audio Surface Container (Intentional dark media viewport)
+            com.universal.dm.ui.theme.UDMTheme(
+                darkTheme = true,
+                dynamicColor = false,
+                configureSystemBars = false
             ) {
-                Box(
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(androidx.compose.ui.graphics.Color.Black),
-                    contentAlignment = Alignment.Center
+                        .aspectRatio(if (task.mediaType == MediaType.AUDIO) 2.2f else 16f / 9f),
+                    shape = MaterialTheme.shapes.large,
+                    colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color.Black)
                 ) {
-                    AndroidView(
-                        modifier = Modifier.fillMaxWidth(),
-                        factory = { ctx ->
-                            PlayerView(ctx).apply {
-                                layoutParams = ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                                player = exoPlayer
-                                useController = true
-                                setShowNextButton(false)
-                                setShowPreviousButton(false)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(androidx.compose.ui.graphics.Color.Black),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxWidth(),
+                            factory = { ctx ->
+                                PlayerView(ctx).apply {
+                                    layoutParams = ViewGroup.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                    player = exoPlayer
+                                    useController = true
+                                    setShowNextButton(false)
+                                    setShowPreviousButton(false)
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
 

@@ -4,20 +4,31 @@ import android.util.Log
 import com.universal.dm.data.local.DownloadDao
 import com.universal.dm.data.model.DownloadStatus
 import com.universal.dm.data.model.MediaType
+import com.universal.dm.domain.sniffer.MediaSizeCalculator
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
 import java.util.regex.Pattern
+import kotlin.math.roundToLong
 
 class StreamExtractorDownloader(
     private val downloadDao: DownloadDao
 ) {
 
-    private val speedMibPattern = Pattern.compile("([0-9.]+)\\s*MiB/s")
-    private val speedKibPattern = Pattern.compile("([0-9.]+)\\s*KiB/s")
-    private val sizeOfPattern = Pattern.compile("of\\s*~?\\s*([0-9.]+)\\s*(GiB|MiB|KiB|B)", Pattern.CASE_INSENSITIVE)
+    private data class ProgressSnapshot(
+        val percent: Int,
+        val speedBytesPerSec: Long,
+        val isMuxing: Boolean,
+        val parsedStreamBytes: Long
+    )
 
     suspend fun downloadStream(
         taskId: String,
@@ -33,11 +44,10 @@ class StreamExtractorDownloader(
     ): File = withContext(Dispatchers.IO) {
         if (!outputDirectory.exists()) outputDirectory.mkdirs()
 
-        // Create a unique temporary subfolder per task so we always pinpoint the exact finished file
+        // Create a unique temporary subfolder per task so finished artifacts are isolated cleanly
         val taskOutputDir = File(outputDirectory, "task_$taskId").apply { if (!exists()) mkdirs() }
 
         val request = YoutubeDLRequest(url)
-        // High compatibility flags for modern YouTube and web stream extraction
         request.addOption("-o", "${taskOutputDir.absolutePath}/%(title).100B.%(ext)s")
         request.addOption("--no-check-certificates")
         request.addOption("--no-warnings")
@@ -48,23 +58,26 @@ class StreamExtractorDownloader(
         request.addOption("--geo-bypass")
 
         val isYouTube = url.contains("youtube.com", ignoreCase = true) ||
-                url.contains("youtu.be", ignoreCase = true)
+            url.contains("youtu.be", ignoreCase = true)
 
         if (!isYouTube) {
-            request.addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+            request.addOption(
+                "--user-agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            )
         }
 
         if (!referer.isNullOrBlank() && !referer.equals(url, ignoreCase = true)) {
             request.addOption("--referer", referer)
         }
 
-        // Extract target height (e.g. 2160, 1440, 1080, 720, 480)
-        val height = Regex("\\d+").find(qualityLabel)?.value?.toIntOrNull() ?: 1080
+        val height = NUMBER_REGEX.find(qualityLabel)?.value?.toIntOrNull() ?: 1080
 
         if (mediaType == MediaType.VIDEO) {
             if (isYouTube) {
-                // Priority format ID if provided from stream sniffer
-                val formatIdPrefix = if (!formatId.isNullOrBlank() && formatId != "direct" && formatId != "video" && formatId != "hls" && formatId != "stream") {
+                val formatIdPrefix = if (!formatId.isNullOrBlank() &&
+                    formatId != "direct" && formatId != "video" && formatId != "hls" && formatId != "stream"
+                ) {
                     "$formatId+bestaudio/$formatId/"
                 } else ""
 
@@ -84,7 +97,6 @@ class StreamExtractorDownloader(
                         request.addOption("--merge-output-format", "mkv")
                     }
                     else -> {
-                        // Standard H.264 Universal
                         request.addOption(
                             "-f",
                             "${formatIdPrefix}bestvideo[height<=$height][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=$height]+bestaudio[ext=m4a]/bestvideo[height<=$height]+bestaudio/best[height<=$height]/bestvideo[height<=$height]/best"
@@ -93,7 +105,6 @@ class StreamExtractorDownloader(
                     }
                 }
             } else {
-                // Non-YouTube / Generic / HLS stream extraction: resilient format selection
                 val formatSpec = when {
                     !formatId.isNullOrBlank() && formatId != "direct" && formatId != "video" && formatId != "hls" && formatId != "stream" -> {
                         "$formatId/best[height<=$height]/bestvideo[height<=$height]+bestaudio/best/bestvideo+bestaudio"
@@ -106,11 +117,9 @@ class StreamExtractorDownloader(
                 request.addOption("--merge-output-format", "mp4")
             }
         } else {
-            // High-Fidelity Audio-only extraction: extract target bitrate (e.g. 320, 256, 128, 64)
-            val targetBitrateKbps = Regex("(\\d+)").find(qualityLabel)?.value?.toIntOrNull() ?: 256
+            val targetBitrateKbps = NUMBER_REGEX.find(qualityLabel)?.value?.toIntOrNull() ?: 256
             val bitrateStr = "${targetBitrateKbps}k"
 
-            // Best audio source selection: prioritize highest bitrate & frequency response available (Opus itag 251 48kHz or AAC itag 141/140)
             request.addOption("-f", "bestaudio/best")
             request.addOption("-x")
 
@@ -131,83 +140,113 @@ class StreamExtractorDownloader(
                     request.addOption("--audio-format", "wav")
                 }
                 else -> {
-                    // Default to high quality MP3 at requested target bitrate
                     request.addOption("--audio-format", "mp3")
                     request.addOption("--audio-quality", bitrateStr)
                 }
             }
         }
 
-        var isMuxing = false
-        var lastDbUpdateTime = 0L
+        // Pre-fetch initial expected size once before launching process (eliminates per-tick SQLite SELECTs)
+        val initialTotal = downloadDao.getTaskById(taskId)?.totalBytes ?: 0L
+        val startTime = System.currentTimeMillis()
         var lastOutputLine = ""
 
-        val startTime = System.currentTimeMillis()
-
         com.universal.dm.UdmApplication.ensureYoutubeDlInitialized(com.universal.dm.UdmApplication.instance)
-        YoutubeDL.getInstance().execute(request, taskId) { progress, _, line ->
-            lastOutputLine = line
-            Log.d("StreamDownloader", "yt-dlp [$taskId]: $line")
 
-            // Check if FFmpeg has started merging separate video & audio streams or extracting audio
-            if (line.contains("Merging", ignoreCase = true) ||
-                line.contains("[Merger]", ignoreCase = true) ||
-                line.contains("[ffmpeg]", ignoreCase = true) ||
-                line.contains("[ExtractAudio]", ignoreCase = true) ||
-                line.contains("Post-process", ignoreCase = true) ||
-                line.contains("Destination:", ignoreCase = true)
-            ) {
-                isMuxing = true
-            }
+        val cancelHandle = currentCoroutineContext()[Job]?.invokeOnCompletion {
+            runCatching { YoutubeDL.getInstance().destroyProcessById(taskId) }
+        }
 
-            // Parse speed from command line output
-            var speedBytes = 0L
-            val mibMatcher = speedMibPattern.matcher(line)
-            if (mibMatcher.find()) {
-                val mib = mibMatcher.group(1)?.toDoubleOrNull() ?: 0.0
-                speedBytes = (mib * 1024 * 1024).toLong()
-            } else {
-                val kibMatcher = speedKibPattern.matcher(line)
-                if (kibMatcher.find()) {
-                    val kib = kibMatcher.group(1)?.toDoubleOrNull() ?: 0.0
-                    speedBytes = (kib * 1024).toLong()
-                }
-            }
+        try {
+            coroutineScope {
+                val progressChannel = Channel<ProgressSnapshot>(Channel.CONFLATED)
 
-            // Parse stream size if printed by yt-dlp (e.g. "of 45.2MiB" or "of ~120MiB")
-            var parsedStreamBytes = 0L
-            val sizeMatcher = sizeOfPattern.matcher(line)
-            if (sizeMatcher.find()) {
-                val num = sizeMatcher.group(1)?.toDoubleOrNull() ?: 0.0
-                val unit = sizeMatcher.group(2)?.uppercase(java.util.Locale.ROOT) ?: ""
-                parsedStreamBytes = when (unit) {
-                    "GIB" -> (num * 1024 * 1024 * 1024).toLong()
-                    "MIB" -> (num * 1024 * 1024).toLong()
-                    "KIB" -> (num * 1024).toLong()
-                    else -> num.toLong()
-                }
-            }
+                val consumerJob = launch {
+                    var maxKnownTotal = initialTotal
+                    var maxDownloadedBytes = 0L
+                    var emaSpeed = 0L
 
-            val progressPercent = progress.toInt().coerceIn(0, 100)
+                    for (snapshot in progressChannel) {
+                        val effectiveSpeed = if (snapshot.speedBytesPerSec > 0L) {
+                            emaSpeed = MediaSizeCalculator.smoothSpeedEma(emaSpeed, snapshot.speedBytesPerSec)
+                            emaSpeed
+                        } else if (snapshot.isMuxing) {
+                            0L
+                        } else {
+                            emaSpeed
+                        }
 
-            val now = System.currentTimeMillis()
-            if (now - lastDbUpdateTime > 400 || progressPercent == 100) {
-                lastDbUpdateTime = now
-                kotlinx.coroutines.runBlocking {
-                    onProgress(progressPercent, speedBytes, isMuxing)
-                    val status = if (isMuxing) DownloadStatus.MERGING_MUXING else DownloadStatus.DOWNLOADING
-                    val existingTask = downloadDao.getTaskById(taskId)
-                    val initialTotal = existingTask?.totalBytes ?: 0L
-                    val taskTotal = if (parsedStreamBytes > 0) parsedStreamBytes else initialTotal
-                    val downloadedCalc = if (taskTotal > 0) {
-                        (taskTotal * progressPercent) / 100L
-                    } else {
-                        // Fallback: estimate from progress and temporary folder contents
-                        (taskOutputDir.listFiles()?.sumOf { it.length() } ?: 0L).coerceAtLeast((progressPercent * 500_000L))
+                        if (snapshot.parsedStreamBytes > maxKnownTotal) {
+                            maxKnownTotal = snapshot.parsedStreamBytes
+                        }
+
+                        val status = if (snapshot.isMuxing) DownloadStatus.MERGING_MUXING else DownloadStatus.DOWNLOADING
+                        val estimatedDownloaded = if (maxKnownTotal > 0L) {
+                            ((maxKnownTotal.toDouble() * snapshot.percent) / 100.0).roundToLong()
+                        } else {
+                            (snapshot.percent * 500_000L)
+                        }
+                        if (estimatedDownloaded > maxDownloadedBytes && !snapshot.isMuxing) {
+                            maxDownloadedBytes = estimatedDownloaded
+                        }
+
+                        onProgress(snapshot.percent, effectiveSpeed, snapshot.isMuxing)
+                        downloadDao.updateTaskProgress(
+                            taskId = taskId,
+                            downloadedBytes = maxDownloadedBytes.coerceAtMost(
+                                if (maxKnownTotal > 0L) maxKnownTotal else Long.MAX_VALUE
+                            ),
+                            totalBytes = maxKnownTotal,
+                            speedBytesPerSec = effectiveSpeed,
+                            status = status
+                        )
                     }
-                    downloadDao.updateTaskProgress(taskId, downloadedCalc, taskTotal, speedBytes, status)
+                }
+
+                var isMuxing = false
+                var lastEmitNanos = 0L
+
+                try {
+                    YoutubeDL.getInstance().execute(request, taskId) { progress, _, line ->
+                        lastOutputLine = line
+                        Log.d(TAG, "yt-dlp [$taskId]: $line")
+
+                        // Trigger muxing ONLY on actual FFmpeg / post-processor stages (never on initial [download] Destination:)
+                        if (line.contains("[Merger]", ignoreCase = true) ||
+                            line.contains("Merging formats", ignoreCase = true) ||
+                            line.contains("[ffmpeg]", ignoreCase = true) ||
+                            line.contains("[ExtractAudio]", ignoreCase = true) ||
+                            line.contains("[VideoRemuxer]", ignoreCase = true) ||
+                            line.contains("[Fixup", ignoreCase = true) ||
+                            line.contains("Post-process", ignoreCase = true) ||
+                            line.contains("Deleting original file", ignoreCase = true)
+                        ) {
+                            isMuxing = true
+                        }
+
+                        val progressPercent = progress.toInt().coerceIn(0, 100)
+                        val nowNanos = System.nanoTime()
+                        if (nowNanos - lastEmitNanos >= CALLBACK_THROTTLE_NANOS || progressPercent == 100 || isMuxing) {
+                            lastEmitNanos = nowNanos
+                            val speedBytes = parseSpeedBytesPerSec(line)
+                            val parsedStreamBytes = parseStreamSizeBytes(line)
+                            progressChannel.trySend(
+                                ProgressSnapshot(
+                                    percent = progressPercent,
+                                    speedBytesPerSec = speedBytes,
+                                    isMuxing = isMuxing,
+                                    parsedStreamBytes = parsedStreamBytes
+                                )
+                            )
+                        }
+                    }
+                } finally {
+                    progressChannel.close()
+                    consumerJob.join()
                 }
             }
+        } finally {
+            cancelHandle?.dispose()
         }
 
         // Search taskOutputDir for the generated file (ignoring temporary .part / .ytdl files)
@@ -216,18 +255,60 @@ class StreamExtractorDownloader(
         }?.sortedByDescending { it.length() }
 
         val finishedFile = files?.firstOrNull() ?: run {
-            // Fallback search in outputDirectory
             outputDirectory.listFiles()?.filter {
                 it.isFile && it.lastModified() >= startTime - 5000 &&
-                        !it.name.endsWith(".part") && !it.name.endsWith(".ytdl")
+                    !it.name.endsWith(".part") && !it.name.endsWith(".ytdl")
             }?.maxByOrNull { it.lastModified() }
         }
 
         if (finishedFile == null || !finishedFile.exists()) {
-            throw IllegalStateException("Download finished but final media file was not found${if (lastOutputLine.isNotBlank()) " (yt-dlp output: $lastOutputLine)" else ""}")
+            throw IllegalStateException(
+                "Download finished but final media file was not found" +
+                    if (lastOutputLine.isNotBlank()) " (yt-dlp output: $lastOutputLine)" else ""
+            )
         }
 
-        Log.d("StreamDownloader", "Successfully produced media file: ${finishedFile.absolutePath} (${finishedFile.length()} bytes)")
+        Log.d(TAG, "Successfully produced media file: ${finishedFile.absolutePath} (${finishedFile.length()} bytes)")
         finishedFile
+    }
+
+    private fun parseSpeedBytesPerSec(line: String): Long {
+        val matcher = SPEED_PATTERN.matcher(line)
+        if (!matcher.find()) return 0L
+        val value = matcher.group(1)?.toDoubleOrNull() ?: return 0L
+        val unit = matcher.group(2)?.uppercase(Locale.ROOT) ?: return 0L
+        return when (unit) {
+            "GIB/S" -> (value * 1024.0 * 1024.0 * 1024.0).roundToLong()
+            "GB/S" -> (value * 1_000_000_000.0).roundToLong()
+            "MIB/S" -> (value * 1024.0 * 1024.0).roundToLong()
+            "MB/S" -> (value * 1_000_000.0).roundToLong()
+            "KIB/S" -> (value * 1024.0).roundToLong()
+            "KB/S" -> (value * 1_000.0).roundToLong()
+            else -> value.roundToLong()
+        }
+    }
+
+    private fun parseStreamSizeBytes(line: String): Long {
+        val matcher = SIZE_OF_PATTERN.matcher(line)
+        if (!matcher.find()) return 0L
+        val value = matcher.group(1)?.toDoubleOrNull() ?: return 0L
+        val unit = matcher.group(2)?.uppercase(Locale.ROOT) ?: return 0L
+        return when (unit) {
+            "GIB" -> (value * 1024.0 * 1024.0 * 1024.0).roundToLong()
+            "GB" -> (value * 1_000_000_000.0).roundToLong()
+            "MIB" -> (value * 1024.0 * 1024.0).roundToLong()
+            "MB" -> (value * 1_000_000.0).roundToLong()
+            "KIB" -> (value * 1024.0).roundToLong()
+            "KB" -> (value * 1_000.0).roundToLong()
+            else -> value.roundToLong()
+        }
+    }
+
+    companion object {
+        private const val TAG = "StreamDownloader"
+        private const val CALLBACK_THROTTLE_NANOS = 400_000_000L
+        private val NUMBER_REGEX = Regex("\\d+")
+        private val SPEED_PATTERN = Pattern.compile("([0-9.]+)\\s*(GiB/s|GB/s|MiB/s|MB/s|KiB/s|KB/s|B/s)", Pattern.CASE_INSENSITIVE)
+        private val SIZE_OF_PATTERN = Pattern.compile("of\\s*~?\\s*([0-9.]+)\\s*(GiB|GB|MiB|MB|KiB|KB|B)", Pattern.CASE_INSENSITIVE)
     }
 }

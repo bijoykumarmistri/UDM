@@ -1,5 +1,6 @@
 package com.universal.dm.ui.browser
 
+import com.universal.dm.data.model.DetectedPageMedia
 import java.util.UUID
 
 /**
@@ -54,5 +55,6 @@ data class BrowserTab(
     val canGoBack: Boolean = false,
     val canGoForward: Boolean = false,
     val blockedAdsCount: Int = 0,
+    val detectedMedia: DetectedPageMedia? = null,
     val lastAccessedTimestamp: Long = System.currentTimeMillis()
 )

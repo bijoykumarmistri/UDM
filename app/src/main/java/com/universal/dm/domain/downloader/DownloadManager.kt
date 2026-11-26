@@ -17,9 +17,7 @@ import com.universal.dm.data.local.DownloadTaskEntity
 import com.universal.dm.data.model.DownloadStatus
 import com.universal.dm.data.model.MediaType
 import com.yausername.youtubedl_android.YoutubeDL
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -32,7 +30,6 @@ class DownloadManager private constructor(context: Context) {
     private val downloadDao: DownloadDao = database.downloadDao()
     private val workManager: WorkManager = WorkManager.getInstance(appContext)
     private val connectivityManager = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-    private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
         registerNetworkCallback()
@@ -49,11 +46,24 @@ class DownloadManager private constructor(context: Context) {
                     val prefs = appContext.getSharedPreferences("udm_app_settings", Context.MODE_PRIVATE)
                     val autoResume = prefs.getBoolean("key_auto_resume_wifi", true)
                     if (autoResume) {
-                        managerScope.launch {
+                        UdmApplication.appScope.launch {
                             val pausedTasks = downloadDao.getTasksByStatus(DownloadStatus.PAUSED)
                             pausedTasks.forEach { task ->
-                                if (task.errorMessage?.contains("wifi", ignoreCase = true) == true ||
-                                    task.errorMessage?.contains("network", ignoreCase = true) == true
+                                val msg = task.errorMessage.orEmpty()
+                                if (msg.contains("wifi", ignoreCase = true) ||
+                                    msg.contains("network", ignoreCase = true)
+                                ) {
+                                    resumeDownload(task.id)
+                                }
+                            }
+                            val failedTasks = downloadDao.getTasksByStatus(DownloadStatus.FAILED)
+                            failedTasks.forEach { task ->
+                                val msg = task.errorMessage.orEmpty()
+                                if (msg.contains("timeout", ignoreCase = true) ||
+                                    msg.contains("unable to resolve", ignoreCase = true) ||
+                                    msg.contains("failed to connect", ignoreCase = true) ||
+                                    msg.contains("network", ignoreCase = true) ||
+                                    msg.contains("socket", ignoreCase = true)
                                 ) {
                                     resumeDownload(task.id)
                                 }
@@ -97,15 +107,12 @@ class DownloadManager private constructor(context: Context) {
             downloadedBytes = 0L,
             status = DownloadStatus.QUEUED,
             speedBytesPerSec = 0L,
-            threadCount = threadCount,
+            threadCount = threadCount.coerceIn(1, 16),
             createdAt = System.currentTimeMillis()
         )
 
         downloadDao.insertTask(task)
-
-        // Enqueue WorkManager job
         scheduleWork(taskId)
-
         taskId
     }
 
@@ -114,11 +121,11 @@ class DownloadManager private constructor(context: Context) {
         runCatching {
             YoutubeDL.getInstance().destroyProcessById(taskId)
         }
-        downloadDao.updateTaskStatus(taskId, DownloadStatus.PAUSED)
+        downloadDao.updateTaskStatus(taskId, DownloadStatus.PAUSED, "Paused by user")
     }
 
     suspend fun resumeDownload(taskId: String) = withContext(Dispatchers.IO) {
-        downloadDao.updateTaskStatus(taskId, DownloadStatus.QUEUED)
+        downloadDao.updateTaskStatus(taskId, DownloadStatus.QUEUED, null)
         scheduleWork(taskId)
     }
 
@@ -127,13 +134,24 @@ class DownloadManager private constructor(context: Context) {
         runCatching {
             YoutubeDL.getInstance().destroyProcessById(taskId)
         }
-        val task = downloadDao.getTaskById(taskId)
-        if (task != null) {
-            val tempFile = File(appContext.cacheDir, "downloads/${task.fileName}")
-            if (tempFile.exists()) tempFile.delete()
-        }
+        cleanupTaskCache(taskId)
         downloadDao.deleteChunksForTask(taskId)
         downloadDao.deleteTaskById(taskId)
+    }
+
+    suspend fun cleanupTaskCache(taskId: String) = withContext(Dispatchers.IO) {
+        val task = downloadDao.getTaskById(taskId)
+        val downloadsCacheDir = File(appContext.cacheDir, "downloads")
+        val taskDir = File(downloadsCacheDir, "task_$taskId")
+        runCatching {
+            if (taskDir.exists()) taskDir.deleteRecursively()
+        }
+        if (task != null) {
+            val legacyTempFile = File(downloadsCacheDir, task.fileName)
+            runCatching {
+                if (legacyTempFile.exists()) legacyTempFile.delete()
+            }
+        }
     }
 
     suspend fun updateNetworkConstraints() = withContext(Dispatchers.IO) {

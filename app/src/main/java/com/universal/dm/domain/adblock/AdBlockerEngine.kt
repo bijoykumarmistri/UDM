@@ -3,48 +3,222 @@ package com.universal.dm.domain.adblock
 import android.content.Context
 import android.net.Uri
 import android.webkit.WebResourceResponse
-import kotlinx.coroutines.CoroutineScope
+import com.universal.dm.UdmApplication
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.ByteArrayInputStream
-import java.util.concurrent.ConcurrentHashMap
+import java.util.Locale
 
 /**
- * UDM Brave Shields / AdGuard Ad & Tracker Blocker Engine
+ * UDM Brave Shields / AdGuard Ad & Tracker Blocker Engine.
  *
- * Provides 3-Tier Protection:
- * 1. Network Layer: Host-based & endpoint path pattern request interception.
- * 2. Cosmetic Layer: Global CSS rules hiding ad slots, banners, and overlays.
- * 3. Scriptlet Layer: YouTube player response sanitizer, ad skipper, and anti-adblock dialog neutralizer.
+ * Uses a zero-allocation reversed-domain character trie for O(host_length) suffix matching
+ * and allocation-free case-insensitive URL/query inspection on the WebView network thread.
  */
-class AdBlockerEngine private constructor(context: Context? = null) {
+class AdBlockerEngine internal constructor(context: Context? = null) {
 
-    private val blockedHosts = ConcurrentHashMap.newKeySet<String>(600)
+    /**
+     * Compact reversed-domain character Trie node.
+     * Supports lock-free concurrent reads and zero-allocation DNS-boundary suffix matching.
+     */
+    private class TrieNode {
+        var isTerminal: Boolean = false
+        private var keys: CharArray = EMPTY_CHARS
+        private var children: Array<TrieNode?> = EMPTY_NODES
+        private var size: Int = 0
 
-    private val blockedPathPatterns = listOf(
-        "/api/stats/ads",
-        "/pagead/",
-        "/ptracking",
-        "/googleads",
-        "/adservice",
-        "/ad_break",
-        "/adunit",
-        "/doubleclick",
-        "/adserver",
-        "/ad-delivery",
-        "/v1/player/ad",
-        "/get_midroll_info",
-        "/stats/ads?",
-        "/aclk?",
-        "/ads.js",
-        "/prebid.js",
-        "googleadservices.com",
-        "googlesyndication.com"
-    )
+        fun getOrCreateChild(ch: Char): TrieNode {
+            for (i in 0 until size) {
+                if (keys[i] == ch) return children[i]!!
+            }
+            if (size == keys.size) {
+                val newCap = if (keys.isEmpty()) 2 else keys.size * 2
+                keys = keys.copyOf(newCap)
+                children = children.copyOf(newCap)
+            }
+            val node = TrieNode()
+            keys[size] = ch
+            children[size] = node
+            size++
+            return node
+        }
+
+        fun getChild(ch: Char): TrieNode? {
+            for (i in 0 until size) {
+                if (keys[i] == ch) return children[i]
+            }
+            return null
+        }
+
+        companion object {
+            private val EMPTY_CHARS = CharArray(0)
+            private val EMPTY_NODES = emptyArray<TrieNode?>()
+        }
+    }
+
+    private class DomainTrie(hosts: Iterable<String>) {
+        private val root = TrieNode()
+
+        init {
+            for (rawHost in hosts) {
+                val host = rawHost.trim().lowercase(Locale.ROOT).trimEnd('.')
+                if (host.isEmpty()) continue
+                var node = root
+                for (i in host.length - 1 downTo 0) {
+                    node = node.getOrCreateChild(host[i])
+                }
+                node.isTerminal = true
+            }
+        }
+
+        fun matches(rawHost: String): Boolean {
+            if (rawHost.isEmpty()) return false
+            val endIdx = if (rawHost.endsWith('.')) rawHost.length - 1 else rawHost.length
+            if (endIdx <= 0) return false
+
+            var node = root
+            for (i in endIdx - 1 downTo 0) {
+                val ch = rawHost[i].lowercaseChar()
+                node = node.getChild(ch) ?: return false
+                if (node.isTerminal && (i == 0 || rawHost[i - 1] == '.')) {
+                    return true
+                }
+            }
+            return false
+        }
+    }
+
+    @Volatile
+    private var hostTrie: DomainTrie = DomainTrie(DEFAULT_BLOCKED_HOSTS)
 
     init {
-        // Pre-populate core ad networks, trackers, and popup domains
-        val defaultHosts = setOf(
+        context?.let { ctx ->
+            UdmApplication.appScope.launch(Dispatchers.IO) {
+                try {
+                    val combined = HashSet<String>(DEFAULT_BLOCKED_HOSTS.size + 300)
+                    combined.addAll(DEFAULT_BLOCKED_HOSTS)
+                    ctx.assets.open("adblock_hosts.txt").bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            val trimmed = line.trim()
+                            if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
+                                combined.add(trimmed)
+                            }
+                        }
+                    }
+                    // Atomic reference swap: zero locking or mutation contention on WebView threads
+                    hostTrie = DomainTrie(combined)
+                } catch (_: Exception) {
+                    // Keep DEFAULT_BLOCKED_HOSTS trie on asset read failure
+                }
+            }
+        }
+    }
+
+    /**
+     * Evaluates whether an incoming Android [Uri] request should be blocked.
+     */
+    fun shouldBlockRequest(url: Uri): Boolean {
+        val host = url.host ?: return false
+        return shouldBlockParsed(rawUrl = url.toString(), host = host, query = url.query)
+    }
+
+    /**
+     * Pure JVM-safe evaluation for a pre-parsed URL, host, and query.
+     * Zero intermediate String allocations on the hot WebView interception path.
+     */
+    internal fun shouldBlockParsed(rawUrl: String, host: String?, query: String?): Boolean {
+        if (!host.isNullOrEmpty() && isHostBlocked(host)) {
+            return true
+        }
+
+        val isVideoPlayback = rawUrl.contains("videoplayback", ignoreCase = true)
+        val hasAdFormatParam = !query.isNullOrEmpty() && (
+            hasQueryParam(query, "adformat") ||
+                hasQueryParam(query, "ad_type") ||
+                hasQueryParam(query, "ad_tag")
+            )
+
+        if (hasAdFormatParam) {
+            return true
+        }
+
+        for (pattern in BLOCKED_PATH_PATTERNS) {
+            if (rawUrl.contains(pattern, ignoreCase = true)) {
+                // Safety guard: Never block legitimate media streams on YouTube / video CDNs
+                if (isVideoPlayback && !rawUrl.contains("adformat=", ignoreCase = true)) {
+                    continue
+                }
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private fun hasQueryParam(query: String, key: String): Boolean {
+        val needle = "$key="
+        if (query.startsWith(needle, ignoreCase = true)) return true
+        var idx = query.indexOf(needle, ignoreCase = true)
+        while (idx > 0) {
+            if (query[idx - 1] == '&') return true
+            idx = query.indexOf(needle, startIndex = idx + 1, ignoreCase = true)
+        }
+        return false
+    }
+
+    fun isHostBlocked(host: String): Boolean {
+        return hostTrie.matches(host)
+    }
+
+    fun shouldBlockUrl(url: String): Boolean {
+        val trimmed = url.trim()
+        val schemeIdx = trimmed.indexOf("://")
+        if (schemeIdx <= 0) return false
+        val afterScheme = trimmed.substring(schemeIdx + 3)
+        val fragIdx = afterScheme.indexOf('#')
+        val withoutFrag = if (fragIdx >= 0) afterScheme.substring(0, fragIdx) else afterScheme
+        val queryIdx = withoutFrag.indexOf('?')
+        val authorityAndPath = if (queryIdx >= 0) withoutFrag.substring(0, queryIdx) else withoutFrag
+        val query = if (queryIdx >= 0) withoutFrag.substring(queryIdx + 1) else null
+        val slashIdx = authorityAndPath.indexOf('/')
+        val authority = if (slashIdx >= 0) authorityAndPath.substring(0, slashIdx) else authorityAndPath
+        val host = authority.substringAfterLast('@').substringBefore(':')
+        return shouldBlockParsed(rawUrl = trimmed, host = host, query = query)
+    }
+
+    fun createEmptyResourceResponse(): WebResourceResponse {
+        return WebResourceResponse(
+            "text/plain",
+            "utf-8",
+            ByteArrayInputStream(EMPTY_BYTES)
+        )
+    }
+
+    companion object {
+        private val EMPTY_BYTES = ByteArray(0)
+
+        private val BLOCKED_PATH_PATTERNS = arrayOf(
+            "/api/stats/ads",
+            "/pagead/",
+            "/ptracking",
+            "/googleads",
+            "/adservice",
+            "/ad_break",
+            "/adunit",
+            "/doubleclick",
+            "/adserver",
+            "/ad-delivery",
+            "/v1/player/ad",
+            "/get_midroll_info",
+            "/stats/ads?",
+            "/aclk?",
+            "/ads.js",
+            "/prebid.js",
+            "googleadservices.com",
+            "googlesyndication.com"
+        )
+
+        private val DEFAULT_BLOCKED_HOSTS = setOf(
             "doubleclick.net",
             "googleads.g.doubleclick.net",
             "pagead2.googlesyndication.com",
@@ -125,85 +299,7 @@ class AdBlockerEngine private constructor(context: Context? = null) {
             "rollerads.com",
             "moatads.com"
         )
-        blockedHosts.addAll(defaultHosts)
 
-        // Load comprehensive Brave Shields / AdGuard host list from assets asynchronously on IO dispatcher
-        context?.let { ctx ->
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    ctx.assets.open("adblock_hosts.txt").bufferedReader().useLines { lines ->
-                        lines.forEach { line ->
-                            val trimmed = line.trim()
-                            if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
-                                blockedHosts.add(trimmed.lowercase())
-                            }
-                        }
-                    }
-                } catch (_: Exception) {
-                    // Fallback to defaultHosts if asset file read encounters an issue
-                }
-            }
-        }
-    }
-
-    /**
-     * Evaluates whether an incoming HTTP request should be blocked.
-     * Evaluates hostname, subdomains, URL path patterns, and query params.
-     */
-    fun shouldBlockRequest(url: Uri): Boolean {
-        val host = url.host?.lowercase() ?: return false
-        if (isHostBlocked(host)) return true
-
-        val fullUrl = url.toString().lowercase()
-        for (pattern in blockedPathPatterns) {
-            if (fullUrl.contains(pattern)) {
-                // Safety guard: Never block legitimate media streams on YouTube / video CDNs
-                if (fullUrl.contains("videoplayback") && !fullUrl.contains("adformat=")) {
-                    continue
-                }
-                return true
-            }
-        }
-
-        // Check query parameters commonly used for ad injection or ad formats
-        val query = url.query?.lowercase()
-        if (!query.isNullOrEmpty()) {
-            if (query.contains("adformat=") || query.contains("&ad_type=") || query.contains("ad_tag=")) {
-                return true
-            }
-        }
-
-        return false
-    }
-
-    fun isHostBlocked(host: String): Boolean {
-        if (blockedHosts.contains(host)) return true
-
-        var subHost = host
-        while (subHost.contains('.')) {
-            subHost = subHost.substringAfter('.')
-            if (blockedHosts.contains(subHost)) {
-                return true
-            }
-        }
-        return false
-    }
-
-    fun shouldBlockUrl(url: String): Boolean {
-        return runCatching {
-            shouldBlockRequest(Uri.parse(url))
-        }.getOrDefault(false)
-    }
-
-    fun createEmptyResourceResponse(): WebResourceResponse {
-        return WebResourceResponse(
-            "text/plain",
-            "utf-8",
-            ByteArrayInputStream(ByteArray(0))
-        )
-    }
-
-    companion object {
         @Volatile
         private var instance: AdBlockerEngine? = null
 
@@ -234,6 +330,7 @@ class AdBlockerEngine private constructor(context: Context? = null) {
          * - Neutralizes video ad playback (mutes and skips instantly at 16x speed)
          * - Auto-clicks skip buttons
          * - Dismisses YouTube anti-adblock dialogs and restores playback
+         * - Throttles MutationObserver via requestAnimationFrame / cooldown to minimize CPU churn
          */
         const val BRAVE_YOUTUBE_SHIELD_JS: String = """javascript:(function() {
             if (window._udmBraveShieldsActive) return;
@@ -281,7 +378,12 @@ class AdBlockerEngine private constructor(context: Context? = null) {
                 });
             } catch(e) {}
 
+            var purgeScheduled = false;
+            var lastPurgeTime = 0;
+
             function purgeVideoAds() {
+                purgeScheduled = false;
+                lastPurgeTime = Date.now();
                 try {
                     var dialogs = document.querySelectorAll('ytd-enforcement-message-view-model, tp-yt-paper-dialog');
                     for (var i = 0; i < dialogs.length; i++) {
@@ -294,12 +396,14 @@ class AdBlockerEngine private constructor(context: Context? = null) {
                     }
 
                     var isAd = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay, .ytp-ad-preview-text');
-                    var video = document.querySelector('video');
-                    if (video && isAd) {
-                        video.muted = true;
-                        video.playbackRate = 16.0;
-                        if (isFinite(video.duration) && video.duration > 0) {
-                            video.currentTime = video.duration;
+                    if (isAd) {
+                        var video = document.querySelector('video');
+                        if (video) {
+                            video.muted = true;
+                            video.playbackRate = 16.0;
+                            if (isFinite(video.duration) && video.duration > 0) {
+                                video.currentTime = video.duration;
+                            }
                         }
                     }
 
@@ -321,10 +425,26 @@ class AdBlockerEngine private constructor(context: Context? = null) {
                 } catch(e) {}
             }
 
-            setInterval(purgeVideoAds, 250);
+            function schedulePurge() {
+                if (purgeScheduled) return;
+                var now = Date.now();
+                if (now - lastPurgeTime < 150) {
+                    purgeScheduled = true;
+                    setTimeout(purgeVideoAds, 150 - (now - lastPurgeTime));
+                } else {
+                    purgeScheduled = true;
+                    if (window.requestAnimationFrame) {
+                        window.requestAnimationFrame(purgeVideoAds);
+                    } else {
+                        setTimeout(purgeVideoAds, 50);
+                    }
+                }
+            }
+
+            setInterval(purgeVideoAds, 500);
 
             try {
-                var observer = new MutationObserver(purgeVideoAds);
+                var observer = new MutationObserver(schedulePurge);
                 if (document.body) {
                     observer.observe(document.body, { childList: true, subtree: true });
                 } else {

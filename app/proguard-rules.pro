@@ -1,15 +1,8 @@
-# OkHttp
--dontwarn okhttp3.**
--dontwarn okio.**
--keep class okhttp3.** { *; }
+# Preserve WebView @JavascriptInterface bridge methods (UdmMediaBridge)
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
 
-# Room
--keep class * extends androidx.room.RoomDatabase
--dontwarn androidx.room.paging.**
-
-# YoutubeDL & FFmpeg
+# YoutubeDL & FFmpeg runtime wrappers and deserialized video info models
 -keep class com.yausername.youtubedl_android.** { *; }
 -keep class com.yausername.ffmpeg.** { *; }
-
-# Media3
--keep class androidx.media3.** { *; }

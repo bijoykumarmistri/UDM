@@ -57,6 +57,9 @@ interface DownloadDao {
     @Query("SELECT * FROM download_chunks WHERE taskId = :taskId ORDER BY threadIndex ASC")
     fun getChunksFlowForTask(taskId: String): Flow<List<DownloadChunkEntity>>
 
+    @Query("SELECT * FROM download_chunks WHERE taskId IN (SELECT id FROM download_tasks WHERE status IN ('QUEUED', 'DOWNLOADING', 'MERGING_MUXING', 'PAUSED')) ORDER BY threadIndex ASC")
+    fun getActiveChunksFlow(): Flow<List<DownloadChunkEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertChunks(chunks: List<DownloadChunkEntity>)
 

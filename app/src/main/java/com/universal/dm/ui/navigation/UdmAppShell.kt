@@ -165,6 +165,7 @@ fun UdmAppShell(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             // Floating Capsule Pill Dock with GPU-accelerated 120Hz sliding indicator

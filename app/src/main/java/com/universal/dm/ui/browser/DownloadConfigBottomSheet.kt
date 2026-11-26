@@ -5,11 +5,8 @@ import android.os.Environment
 import android.os.StatFs
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -35,8 +32,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Bolt
@@ -54,9 +51,6 @@ import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Radio
-import androidx.compose.material.icons.filled.RadioButtonChecked
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Tune
@@ -74,10 +68,8 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -89,19 +81,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -114,8 +104,8 @@ import com.universal.dm.data.model.StreamVariant
 import com.universal.dm.data.model.VideoCodec
 import com.universal.dm.domain.sniffer.MediaSizeCalculator
 import com.universal.dm.ui.settings.LocalAppSettings
-import com.universal.dm.ui.theme.CodecAv1Badge
-import com.universal.dm.ui.theme.CodecM4aBadge
+import com.universal.dm.ui.theme.UDMTheme
+import com.universal.dm.ui.theme.UdmTheme
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -161,15 +151,13 @@ fun DownloadConfigBottomSheet(
     ) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
-    val containerColor = if (isDark) Color(0xFF07121B) else MaterialTheme.colorScheme.surfaceContainerLow
-    val handleColor = if (isDark) Color(0xFF223A4D) else MaterialTheme.colorScheme.outlineVariant
+    val colorScheme = MaterialTheme.colorScheme
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = containerColor,
+        containerColor = colorScheme.surfaceContainerLow,
         dragHandle = {
             Box(
                 modifier = Modifier
@@ -177,7 +165,7 @@ fun DownloadConfigBottomSheet(
                     .width(42.dp)
                     .height(4.5.dp)
                     .clip(CircleShape)
-                    .background(handleColor)
+                    .background(colorScheme.outlineVariant)
             )
         }
     ) {
@@ -213,8 +201,9 @@ fun DownloadConfigContent(
     val clipboardManager = LocalClipboardManager.current
     val appSettings = LocalAppSettings.current
     val scrollState = rememberScrollState()
+    val colorScheme = MaterialTheme.colorScheme
+    val extendedColors = UdmTheme.extendedColors
 
-    // 1. Initial Media Type State & Direct File Recognition
     val isDirectFile = detectedMedia.isDirectFile ||
             (detectedMedia.videoVariants.isEmpty() && detectedMedia.audioVariants.isEmpty())
 
@@ -235,7 +224,6 @@ fun DownloadConfigContent(
         )
     }
 
-    // Editable Filename
     val initialSanitizedName = remember(detectedMedia.pageTitle, detectedExtension) {
         val raw = detectedMedia.pageTitle.trim()
         val stripped = if (detectedExtension.isNotBlank() && raw.endsWith(".$detectedExtension", ignoreCase = true)) {
@@ -251,13 +239,11 @@ fun DownloadConfigContent(
     }
     var editableFileName by remember(detectedMedia.pageUrl) { mutableStateOf(initialSanitizedName) }
 
-    // Advanced Options State
     var isAdvancedExpanded by remember { mutableStateOf(false) }
     var selectedThreadCount by remember { mutableIntStateOf(appSettings.threadCount.coerceIn(1, 16)) }
     var destinationFolder by remember { mutableStateOf(appSettings.defaultDownloadFolder) }
     var isWifiOnly by remember { mutableStateOf(appSettings.wifiOnlyDownloads) }
 
-    // Storage calculation
     val freeStorageBytes = remember {
         try {
             val stat = StatFs(Environment.getDataDirectory().path)
@@ -267,20 +253,17 @@ fun DownloadConfigContent(
         }
     }
 
-    // 2. Compute Quality Options with Mathematical Sizing & Luxury Badges
-    val videoQualityOptions = remember(detectedMedia.videoVariants, detectedMedia.durationSeconds) {
+    val videoQualityOptions = remember(detectedMedia.videoVariants, detectedMedia.durationSeconds, colorScheme, extendedColors) {
         val standardHeights = listOf(
-            Triple(2160, "2160p 4K", Pair("Ultra HD", Color(0xFFFFB300))),
-            Triple(1440, "1440p QHD", Pair("Quad HD", Color(0xFF8B5CF6))),
-            Triple(1080, "1080p FHD", Pair("Most Popular", Color(0xFF00E5FF))),
-            Triple(720, "720p HD", Pair("High Def", Color(0xFF00B0FF))),
-            Triple(480, "480p SD", Pair("Standard", Color(0xFF4DD0E1))),
-            Triple(360, "360p", Pair("Data Saver", Color(0xFF80CBC4)))
+            Triple(2160, "2160p 4K", Pair("Ultra HD", extendedColors.warning)),
+            Triple(1440, "1440p QHD", Pair("Quad HD", colorScheme.tertiary)),
+            Triple(1080, "1080p FHD", Pair("Most Popular", colorScheme.primary)),
+            Triple(720, "720p HD", Pair("High Def", colorScheme.secondary)),
+            Triple(480, "480p SD", Pair("Standard", colorScheme.secondary)),
+            Triple(360, "360p", Pair("Data Saver", extendedColors.success))
         )
 
         val availableVariantsByHeight = detectedMedia.videoVariants.groupBy { it.resolutionHeight }
-        val maxAvailableHeight = detectedMedia.videoVariants.maxOfOrNull { it.resolutionHeight } ?: 1080
-
         val result = mutableListOf<QualitySelectionItem>()
         val duration = detectedMedia.durationSeconds
 
@@ -290,7 +273,6 @@ fun DownloadConfigContent(
 
             if (match != null || hasNearbyVariant != null) {
                 val variant = match ?: hasNearbyVariant
-
                 val isExactOrNearby = variant != null && kotlin.math.abs(variant.resolutionHeight - height) <= 60
                 val computedBytes = if (isExactOrNearby && (variant?.fileSizeBytes ?: 0L) > 0) {
                     variant!!.fileSizeBytes
@@ -318,7 +300,6 @@ fun DownloadConfigContent(
             }
         }
 
-        // Add remaining unique variants from source streams
         detectedMedia.videoVariants.forEach { v ->
             if (v.resolutionHeight > 0 && result.none { kotlin.math.abs(it.height - v.resolutionHeight) <= 60 }) {
                 val computedBytes = if (v.fileSizeBytes > 0) {
@@ -337,7 +318,7 @@ fun DownloadConfigContent(
                         label = v.qualityLabel,
                         subLabel = MediaSizeCalculator.formatFileSize(computedBytes),
                         badge = "Native",
-                        badgeColor = Color(0xFF64B5F6),
+                        badgeColor = colorScheme.primary,
                         height = v.resolutionHeight,
                         bitrateKbps = v.bitrateKbps,
                         matchedVariant = v.copy(fileSizeBytes = computedBytes)
@@ -370,7 +351,7 @@ fun DownloadConfigContent(
         result.sortedByDescending { it.height }
     }
 
-    val audioQualityOptions = remember(detectedMedia.audioVariants, detectedMedia.durationSeconds, detectedMedia.directFileUrl, isDirectFile) {
+    val audioQualityOptions = remember(detectedMedia.audioVariants, detectedMedia.durationSeconds, detectedMedia.directFileUrl, isDirectFile, colorScheme, extendedColors) {
         if (isDirectFile || (detectedMedia.audioVariants.isEmpty() && detectedMedia.directFileUrl == null)) {
             emptyList<QualitySelectionItem>()
         } else {
@@ -389,7 +370,7 @@ fun DownloadConfigContent(
                     label = "320 kbps Master",
                     subLabel = "${MediaSizeCalculator.formatFileSize(masterBytes)} (Audiophile)",
                     badge = "Ultra Hi-Fi",
-                    badgeColor = Color(0xFFFFD700),
+                    badgeColor = extendedColors.warning,
                     height = 0,
                     bitrateKbps = 320,
                     matchedVariant = maxKbpsVariant?.copy(fileSizeBytes = masterBytes, bitrateKbps = 320) ?: maxKbpsVariant
@@ -398,7 +379,7 @@ fun DownloadConfigContent(
                     label = "256 kbps Studio",
                     subLabel = "${MediaSizeCalculator.formatFileSize(studioBytes)} (High Fidelity)",
                     badge = "Studio Grade",
-                    badgeColor = Color(0xFFB388FF),
+                    badgeColor = colorScheme.tertiary,
                     height = 0,
                     bitrateKbps = 256,
                     matchedVariant = maxKbpsVariant?.copy(fileSizeBytes = studioBytes, bitrateKbps = 256) ?: maxKbpsVariant
@@ -407,7 +388,7 @@ fun DownloadConfigContent(
                     label = "128 kbps Standard",
                     subLabel = "${MediaSizeCalculator.formatFileSize(stdBytes)} (Balanced)",
                     badge = "Crisp AAC",
-                    badgeColor = Color(0xFF00E5FF),
+                    badgeColor = colorScheme.primary,
                     height = 0,
                     bitrateKbps = 128,
                     matchedVariant = midKbpsVariant?.copy(fileSizeBytes = stdBytes, bitrateKbps = 128) ?: midKbpsVariant
@@ -416,7 +397,7 @@ fun DownloadConfigContent(
                     label = "64 kbps Saver",
                     subLabel = "${MediaSizeCalculator.formatFileSize(saverBytes)} (Compact)",
                     badge = "Data Saver",
-                    badgeColor = Color(0xFF4DD0E1),
+                    badgeColor = extendedColors.success,
                     height = 0,
                     bitrateKbps = 64,
                     matchedVariant = minKbpsVariant?.copy(fileSizeBytes = saverBytes, bitrateKbps = 64) ?: minKbpsVariant
@@ -425,7 +406,6 @@ fun DownloadConfigContent(
         }
     }
 
-    // Selected Quality (Stage 2)
     val defaultVideoHeight = videoQualityOptions.firstOrNull()?.height ?: 1080
     var selectedHeight by remember(detectedMedia.pageUrl) { mutableIntStateOf(defaultVideoHeight) }
     var selectedAudioTier by remember(detectedMedia.pageUrl) { mutableStateOf("studio") }
@@ -443,13 +423,11 @@ fun DownloadConfigContent(
         } ?: audioQualityOptions.find { it.bitrateKbps == 256 } ?: audioQualityOptions.firstOrNull()
     }
 
-    // Selected Codec Name
     var selectedCodecName by remember(selectedMediaType) {
         mutableStateOf(if (selectedMediaType == MediaType.VIDEO) "AV1" else "M4A")
     }
 
-    // 3. Compute Codec Options (Stage 3)
-    val videoCodecOptions = remember(selectedQuality, detectedMedia.videoVariants, detectedMedia.durationSeconds) {
+    val videoCodecOptions = remember(selectedQuality, detectedMedia.videoVariants, detectedMedia.durationSeconds, colorScheme) {
         val q = selectedQuality
         val height = q?.height ?: 1080
         val duration = detectedMedia.durationSeconds
@@ -502,7 +480,7 @@ fun DownloadConfigContent(
                 badge = "Next-Gen • 35% Smaller • Hardware Decoded",
                 featureHighlight = "Save up to 40% bandwidth with cutting-edge visual fidelity",
                 sizeText = MediaSizeCalculator.formatFileSize(av1Bytes),
-                accentColor = CodecAv1Badge,
+                accentColor = colorScheme.tertiary,
                 matchedVariant = av1Match?.copy(fileSizeBytes = av1Bytes) ?: q?.matchedVariant?.copy(fileSizeBytes = av1Bytes),
                 extension = "mp4"
             ),
@@ -512,7 +490,7 @@ fun DownloadConfigContent(
                 badge = "Universal Playback • Full Compatibility",
                 featureHighlight = "Plays seamlessly on any phone, Smart TV, or PC without transcoding",
                 sizeText = MediaSizeCalculator.formatFileSize(h264Bytes),
-                accentColor = Color(0xFF00E5FF),
+                accentColor = colorScheme.primary,
                 matchedVariant = h264Match?.copy(fileSizeBytes = h264Bytes) ?: q?.matchedVariant?.copy(fileSizeBytes = h264Bytes),
                 extension = "mp4"
             ),
@@ -522,14 +500,14 @@ fun DownloadConfigContent(
                 badge = "High Dynamic Range • YouTube Standard",
                 featureHighlight = "Optimized for Google streams with rich color depth and 60fps",
                 sizeText = MediaSizeCalculator.formatFileSize(vp9Bytes),
-                accentColor = Color(0xFF0084FF),
+                accentColor = colorScheme.secondary,
                 matchedVariant = vp9Match?.copy(fileSizeBytes = vp9Bytes) ?: q?.matchedVariant?.copy(fileSizeBytes = vp9Bytes),
                 extension = "mkv"
             )
         )
     }
 
-    val audioCodecOptions = remember(selectedQuality, detectedMedia.audioVariants, detectedMedia.durationSeconds) {
+    val audioCodecOptions = remember(selectedQuality, detectedMedia.audioVariants, detectedMedia.durationSeconds, colorScheme, extendedColors) {
         val q = selectedQuality
         val baseRate = q?.bitrateKbps ?: 256
         val duration = detectedMedia.durationSeconds
@@ -549,7 +527,7 @@ fun DownloadConfigContent(
                 badge = "Apple & Android Native AAC • Recommended",
                 featureHighlight = "Hardware-accelerated AAC encoding at $baseRate kbps with full fidelity",
                 sizeText = MediaSizeCalculator.formatFileSize(m4aBytes),
-                accentColor = CodecM4aBadge,
+                accentColor = colorScheme.primary,
                 matchedVariant = m4aMatch?.copy(fileSizeBytes = m4aBytes, bitrateKbps = baseRate)
                     ?: q?.matchedVariant?.copy(fileSizeBytes = m4aBytes, bitrateKbps = baseRate),
                 extension = "m4a"
@@ -560,7 +538,7 @@ fun DownloadConfigContent(
                 badge = "Next-Gen Audio • Pristine 48kHz Clarity",
                 featureHighlight = "Ultra-low distortion Opus stream at $baseRate kbps preserving studio harmonics",
                 sizeText = MediaSizeCalculator.formatFileSize(opusBytes),
-                accentColor = Color(0xFF38EF7D),
+                accentColor = extendedColors.success,
                 matchedVariant = opusMatch?.copy(fileSizeBytes = opusBytes, bitrateKbps = baseRate)
                     ?: q?.matchedVariant?.copy(fileSizeBytes = opusBytes, bitrateKbps = baseRate),
                 extension = "opus"
@@ -571,7 +549,7 @@ fun DownloadConfigContent(
                 badge = "Universal Legacy Audio • 320kbps Ready",
                 featureHighlight = "LAME-encoded MP3 at $baseRate kbps for high-end audio gear and car stereos",
                 sizeText = MediaSizeCalculator.formatFileSize(mp3Bytes),
-                accentColor = Color(0xFFFFB300),
+                accentColor = extendedColors.warning,
                 matchedVariant = mp3Match?.copy(fileSizeBytes = mp3Bytes, bitrateKbps = baseRate)
                     ?: q?.matchedVariant?.copy(fileSizeBytes = mp3Bytes, bitrateKbps = baseRate),
                 extension = "mp3"
@@ -583,7 +561,6 @@ fun DownloadConfigContent(
     val selectedCodec = activeCodecOptions.find { it.codecName.equals(selectedCodecName, ignoreCase = true) }
         ?: activeCodecOptions.firstOrNull()
 
-    // Sizing and Duration calculations for CTA & Gauge
     val finalCodecName = when (selectedMediaType) {
         MediaType.DIRECT_FILE -> detectedExtension.uppercase(Locale.ROOT)
         MediaType.VIDEO -> selectedCodec?.codecName ?: "AV1"
@@ -632,9 +609,24 @@ fun DownloadConfigContent(
         }
     }
 
-    // Estimated download time at 65 Mbps (representative LTE / 5G / Wi-Fi)
     val estimatedSeconds = (finalTotalBytes.toDouble() / (8_000_000)).coerceAtLeast(1.0).roundToInt()
     val etaString = if (estimatedSeconds < 60) "~${estimatedSeconds}s on Wi-Fi" else "~${estimatedSeconds / 60}m ${estimatedSeconds % 60}s"
+
+    val emblemBgColor = when (selectedMediaType) {
+        MediaType.DIRECT_FILE -> extendedColors.successContainer
+        MediaType.VIDEO -> colorScheme.primaryContainer
+        MediaType.AUDIO -> colorScheme.tertiaryContainer
+    }
+    val emblemContentColor = when (selectedMediaType) {
+        MediaType.DIRECT_FILE -> extendedColors.onSuccessContainer
+        MediaType.VIDEO -> colorScheme.onPrimaryContainer
+        MediaType.AUDIO -> colorScheme.onTertiaryContainer
+    }
+    val emblemBorderColor = when (selectedMediaType) {
+        MediaType.DIRECT_FILE -> extendedColors.success.copy(alpha = 0.5f)
+        MediaType.VIDEO -> colorScheme.primary.copy(alpha = 0.5f)
+        MediaType.AUDIO -> colorScheme.tertiary.copy(alpha = 0.5f)
+    }
 
     Column(
         modifier = Modifier
@@ -643,14 +635,12 @@ fun DownloadConfigContent(
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        // =========================================================================
-        // 1. TOP MEDIA IDENTITY CARD (CYBER LUXURY MEDIA PLATE)
-        // =========================================================================
+        // 1. TOP MEDIA IDENTITY CARD
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0C1924)),
-            border = BorderStroke(1.dp, Color(0xFF1B3244))
+            colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainer),
+            border = BorderStroke(1.dp, colorScheme.outlineVariant)
         ) {
             Column(
                 modifier = Modifier.padding(14.dp),
@@ -661,29 +651,12 @@ fun DownloadConfigContent(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Futuristic Glowing Media Emblem
                     Box(
                         modifier = Modifier
                             .size(58.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    when (selectedMediaType) {
-                                        MediaType.DIRECT_FILE -> listOf(Color(0xFF00E676), Color(0xFF00897B))
-                                        MediaType.VIDEO -> listOf(Color(0xFF00E5FF), Color(0xFF0052D4))
-                                        MediaType.AUDIO -> listOf(Color(0xFFB388FF), Color(0xFF651FFF))
-                                    }
-                                )
-                            )
-                            .border(
-                                1.dp,
-                                when (selectedMediaType) {
-                                    MediaType.DIRECT_FILE -> Color(0xFF00E676).copy(0.7f)
-                                    MediaType.VIDEO -> Color(0xFF00E5FF).copy(0.7f)
-                                    MediaType.AUDIO -> Color(0xFFB388FF).copy(0.7f)
-                                },
-                                RoundedCornerShape(16.dp)
-                            ),
+                            .background(emblemBgColor)
+                            .border(1.dp, emblemBorderColor, RoundedCornerShape(16.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -698,12 +671,11 @@ fun DownloadConfigContent(
                                 MediaType.AUDIO -> Icons.Default.Audiotrack
                             },
                             contentDescription = null,
-                            tint = Color.White,
+                            tint = emblemContentColor,
                             modifier = Modifier.size(28.dp)
                         )
                     }
 
-                    // Media Badges & Host Info
                     Column(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(5.dp)
@@ -712,13 +684,12 @@ fun DownloadConfigContent(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Domain Pill
                             val domain = runCatching { Uri.parse(detectedMedia.pageUrl).host }.getOrNull() ?: "Web Stream"
                             Box(
                                 modifier = Modifier
                                     .clip(CircleShape)
-                                    .background(Color(0xFF132738))
-                                    .border(1.dp, Color(0xFF1E3F59), CircleShape)
+                                    .background(colorScheme.surfaceContainerHigh)
+                                    .border(1.dp, colorScheme.outlineVariant, CircleShape)
                                     .padding(horizontal = 8.dp, vertical = 3.dp)
                             ) {
                                 Row(
@@ -728,27 +699,26 @@ fun DownloadConfigContent(
                                     Icon(
                                         imageVector = Icons.Default.Public,
                                         contentDescription = null,
-                                        tint = Color(0xFF00E5FF),
+                                        tint = colorScheme.primary,
                                         modifier = Modifier.size(12.dp)
                                     )
                                     Text(
                                         text = domain.removePrefix("www.").removePrefix("m."),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xFFB0CEDB)
+                                        color = colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
 
-                            // Duration Pill
                             detectedMedia.durationSeconds?.let { dur ->
                                 val m = dur / 60
                                 val s = dur % 60
                                 Box(
                                     modifier = Modifier
                                         .clip(CircleShape)
-                                        .background(Color(0xFF132738))
-                                        .border(1.dp, Color(0xFF1E3F59), CircleShape)
+                                        .background(colorScheme.surfaceContainerHigh)
+                                        .border(1.dp, colorScheme.outlineVariant, CircleShape)
                                         .padding(horizontal = 8.dp, vertical = 3.dp)
                                 ) {
                                     Row(
@@ -758,21 +728,20 @@ fun DownloadConfigContent(
                                         Icon(
                                             imageVector = Icons.Default.Schedule,
                                             contentDescription = null,
-                                            tint = Color(0xFFFFB300),
+                                            tint = extendedColors.warning,
                                             modifier = Modifier.size(12.dp)
                                         )
                                         Text(
                                             text = String.format(Locale.US, "%02d:%02d", m, s),
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.SemiBold,
-                                            color = Color(0xFFB0CEDB)
+                                            color = colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
                             }
                         }
 
-                        // Stream Quality Telemetry Tag
                         Text(
                             text = when (selectedMediaType) {
                                 MediaType.DIRECT_FILE -> "Direct ${detectedExtension.uppercase(Locale.ROOT)} File Available"
@@ -780,11 +749,10 @@ fun DownloadConfigContent(
                                 MediaType.AUDIO -> "Direct Hi-Res Audio Stream Available"
                             },
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF7591A3)
+                            color = colorScheme.onSurfaceVariant
                         )
                     }
 
-                    // Direct Link Copy Button
                     IconButton(
                         onClick = {
                             val directUrl = detectedMedia.directFileUrl ?: detectedMedia.pageUrl
@@ -795,22 +763,22 @@ fun DownloadConfigContent(
                         modifier = Modifier
                             .size(34.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF132738))
+                            .background(colorScheme.surfaceContainerHigh)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ContentCopy,
                             contentDescription = "Copy Stream URL",
-                            tint = Color(0xFF00E5FF),
+                            tint = colorScheme.primary,
                             modifier = Modifier.size(16.dp)
                         )
                     }
                 }
 
-                // Glassmorphic Filename Editor
+                // Filename Editor
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF07121B),
-                    border = BorderStroke(1.dp, Color(0xFF1B3244))
+                    color = colorScheme.surface,
+                    border = BorderStroke(1.dp, colorScheme.outlineVariant)
                 ) {
                     Row(
                         modifier = Modifier
@@ -822,7 +790,7 @@ fun DownloadConfigContent(
                         Icon(
                             imageVector = Icons.Default.Edit,
                             contentDescription = null,
-                            tint = Color(0xFF00E5FF),
+                            tint = colorScheme.primary,
                             modifier = Modifier.size(16.dp)
                         )
 
@@ -831,36 +799,25 @@ fun DownloadConfigContent(
                             onValueChange = { editableFileName = it },
                             modifier = Modifier.weight(1f),
                             textStyle = TextStyle(
-                                color = Color.White,
+                                color = colorScheme.onSurface,
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Medium
                             ),
-                            cursorBrush = SolidColor(Color(0xFF00E5FF)),
+                            cursorBrush = SolidColor(colorScheme.primary),
                             singleLine = true
                         )
 
-                        // Extension Tag Badge
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(
-                                    when (selectedMediaType) {
-                                        MediaType.DIRECT_FILE -> Color(0xFF00E676).copy(alpha = 0.15f)
-                                        MediaType.VIDEO -> Color(0xFF142B3A)
-                                        MediaType.AUDIO -> Color(0xFF651FFF).copy(alpha = 0.2f)
-                                    }
-                                )
+                                .background(emblemBgColor)
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = ".$finalExtension",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = when (selectedMediaType) {
-                                    MediaType.DIRECT_FILE -> Color(0xFF00E676)
-                                    MediaType.VIDEO -> Color(0xFF00E5FF)
-                                    MediaType.AUDIO -> Color(0xFFB388FF)
-                                }
+                                color = emblemContentColor
                             )
                         }
 
@@ -868,7 +825,7 @@ fun DownloadConfigContent(
                             Icon(
                                 imageVector = Icons.Default.Clear,
                                 contentDescription = "Clear",
-                                tint = Color(0xFF7591A3),
+                                tint = colorScheme.onSurfaceVariant,
                                 modifier = Modifier
                                     .size(16.dp)
                                     .clickable { editableFileName = "" }
@@ -879,13 +836,11 @@ fun DownloadConfigContent(
             }
         }
 
-        // =========================================================================
         // 2. STORAGE GAUGE & SPEED TELEMETRY BAR
-        // =========================================================================
         Surface(
             shape = RoundedCornerShape(14.dp),
-            color = Color(0xFF0B1722),
-            border = BorderStroke(1.dp, Color(0xFF162C3D))
+            color = colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, colorScheme.outlineVariant)
         ) {
             Row(
                 modifier = Modifier
@@ -901,19 +856,19 @@ fun DownloadConfigContent(
                     Icon(
                         imageVector = Icons.Default.Storage,
                         contentDescription = null,
-                        tint = if (freeStorageBytes > finalTotalBytes * 2) Color(0xFF00E5FF) else Color(0xFFFFB300),
+                        tint = if (freeStorageBytes > finalTotalBytes * 2) colorScheme.primary else extendedColors.warning,
                         modifier = Modifier.size(14.dp)
                     )
                     Text(
                         text = "Free: ${MediaSizeCalculator.formatFileSize(freeStorageBytes)}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFFB0CEDB),
+                        color = colorScheme.onSurface,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
                         text = "• Download: ${MediaSizeCalculator.formatFileSize(finalTotalBytes)}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF7591A3)
+                        color = colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -924,13 +879,13 @@ fun DownloadConfigContent(
                     Icon(
                         imageVector = Icons.Default.Bolt,
                         contentDescription = null,
-                        tint = Color(0xFF38EF7D),
+                        tint = extendedColors.success,
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
                         text = etaString,
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF38EF7D),
+                        color = extendedColors.success,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -938,12 +893,11 @@ fun DownloadConfigContent(
         }
 
         if (selectedMediaType == MediaType.DIRECT_FILE) {
-            // Direct File Specification Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0C1924)),
-                border = BorderStroke(1.dp, Color(0xFF00E676).copy(alpha = 0.35f))
+                colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainer),
+                border = BorderStroke(1.dp, extendedColors.success.copy(alpha = 0.4f))
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
@@ -962,7 +916,7 @@ fun DownloadConfigContent(
                                 modifier = Modifier
                                     .size(42.dp)
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(Color(0xFF00E676).copy(alpha = 0.15f)),
+                                    .background(extendedColors.successContainer),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -973,7 +927,7 @@ fun DownloadConfigContent(
                                         else -> Icons.AutoMirrored.Filled.InsertDriveFile
                                     },
                                     contentDescription = null,
-                                    tint = Color(0xFF00E676),
+                                    tint = extendedColors.onSuccessContainer,
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
@@ -982,12 +936,12 @@ fun DownloadConfigContent(
                                     text = finalQualityLabel,
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    color = colorScheme.onSurface
                                 )
                                 Text(
                                     text = "Native File Extension: .${detectedExtension.lowercase(Locale.ROOT)}",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFF88A4B5)
+                                    color = colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -995,408 +949,227 @@ fun DownloadConfigContent(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF00E676).copy(alpha = 0.18f))
-                                .border(1.dp, Color(0xFF00E676).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .background(extendedColors.successContainer)
+                                .border(1.dp, extendedColors.success.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                                 .padding(horizontal = 9.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = detectedExtension.uppercase(Locale.ROOT),
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Black,
-                                color = Color(0xFF00E676)
+                                color = extendedColors.onSuccessContainer
                             )
                         }
                     }
 
-                    HorizontalDivider(color = Color(0xFF1B3244))
+                    HorizontalDivider(color = colorScheme.outlineVariant)
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column {
-                            Text("Detected Size", style = MaterialTheme.typography.bodySmall, color = Color(0xFF7591A3))
+                            Text("Detected Size", style = MaterialTheme.typography.bodySmall, color = colorScheme.onSurfaceVariant)
                             Text(
                                 text = if (finalTotalBytes > 0) MediaSizeCalculator.formatFileSize(finalTotalBytes) else "Server Stream (Dynamic)",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00E676)
+                                color = extendedColors.success
                             )
                         }
 
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("Download Protocol", style = MaterialTheme.typography.bodySmall, color = Color(0xFF7591A3))
+                            Text("Download Protocol", style = MaterialTheme.typography.bodySmall, color = colorScheme.onSurfaceVariant)
                             Text(
                                 text = "Multi-Socket Parallel ($selectedThreadCount Threads)",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = colorScheme.onSurface
                             )
                         }
                     }
                 }
             }
         } else {
-            // =========================================================================
-            // 3. STAGE 1: MEDIA TYPE SELECTOR (APPLE FLOATING PILL SLIDER)
-            // =========================================================================
+            // 3. STAGE 1: MEDIA TYPE SELECTOR
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = "1. Select Media Type",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF00E5FF)
-            )
-
-            // Apple Floating Segmented Pill
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF0C1924),
-                border = BorderStroke(1.dp, Color(0xFF1A3345))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    // Video Option
-                    val isVideo = selectedMediaType == MediaType.VIDEO
-                    val videoSource = remember { MutableInteractionSource() }
-                    val isVideoPressed by videoSource.collectIsPressedAsState()
-                    val videoScale by animateFloatAsState(
-                        targetValue = if (isVideoPressed) 0.97f else 1f,
-                        animationSpec = spring(stiffness = 500f),
-                        label = "videoScale"
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .graphicsLayer {
-                                scaleX = videoScale
-                                scaleY = videoScale
-                            }
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (isVideo) {
-                                    Brush.horizontalGradient(
-                                        listOf(Color(0xFF00E5FF).copy(0.25f), Color(0xFF0084FF).copy(0.35f))
-                                    )
-                                } else {
-                                    SolidColor(Color.Transparent)
-                                }
-                            )
-                            .border(
-                                width = if (isVideo) 1.5.dp else 0.dp,
-                                color = if (isVideo) Color(0xFF00E5FF) else Color.Transparent,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .clickable(interactionSource = videoSource, indication = null) {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                selectedMediaType = MediaType.VIDEO
-                            }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isVideo) Icons.Default.CheckCircle else Icons.Default.Movie,
-                                contentDescription = null,
-                                tint = if (isVideo) Color(0xFF00E5FF) else Color(0xFF6B8799),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "Video (with Audio)",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = if (isVideo) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isVideo) Color.White else Color(0xFF7A97A8)
-                            )
-                        }
-                    }
-
-                    // Audio Option
-                    val isAudio = selectedMediaType == MediaType.AUDIO
-                    val audioSource = remember { MutableInteractionSource() }
-                    val isAudioPressed by audioSource.collectIsPressedAsState()
-                    val audioScale by animateFloatAsState(
-                        targetValue = if (isAudioPressed) 0.97f else 1f,
-                        animationSpec = spring(stiffness = 500f),
-                        label = "audioScale"
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .graphicsLayer {
-                                scaleX = audioScale
-                                scaleY = audioScale
-                            }
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (isAudio) {
-                                    Brush.horizontalGradient(
-                                        listOf(Color(0xFFB388FF).copy(0.25f), Color(0xFF651FFF).copy(0.35f))
-                                    )
-                                } else {
-                                    SolidColor(Color.Transparent)
-                                }
-                            )
-                            .border(
-                                width = if (isAudio) 1.5.dp else 0.dp,
-                                color = if (isAudio) Color(0xFFB388FF) else Color.Transparent,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .clickable(interactionSource = audioSource, indication = null) {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                selectedMediaType = MediaType.AUDIO
-                            }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isAudio) Icons.Default.CheckCircle else Icons.Default.Audiotrack,
-                                contentDescription = null,
-                                tint = if (isAudio) Color(0xFFB388FF) else Color(0xFF6B8799),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "Audio Only",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = if (isAudio) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isAudio) Color.White else Color(0xFF7A97A8)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // =========================================================================
-        // 4. FAST PRESET QUICK-PICKS (ONE-TAP SPEED RECOMMENDATIONS)
-        // =========================================================================
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Best Quality Preset
-            PresetQuickPill(
-                label = "Best Quality",
-                icon = Icons.Default.HighQuality,
-                accentColor = Color(0xFFFFB300),
-                modifier = Modifier.weight(1f)
-            ) {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                if (selectedMediaType == MediaType.VIDEO) {
-                    val highest = videoQualityOptions.firstOrNull()?.height ?: 1080
-                    selectedHeight = highest
-                    selectedCodecName = "AV1"
-                } else {
-                    selectedAudioTier = "master"
-                    selectedCodecName = "M4A"
-                }
-            }
-
-            // Balanced Preset
-            PresetQuickPill(
-                label = "Balanced",
-                icon = Icons.Default.Bolt,
-                accentColor = Color(0xFF00E5FF),
-                modifier = Modifier.weight(1f)
-            ) {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                if (selectedMediaType == MediaType.VIDEO) {
-                    val balanced = videoQualityOptions.find { it.height in 720..1080 }?.height ?: 1080
-                    selectedHeight = balanced
-                    selectedCodecName = "H.264"
-                } else {
-                    selectedAudioTier = "standard"
-                    selectedCodecName = "M4A"
-                }
-            }
-
-            // Data Saver Preset
-            PresetQuickPill(
-                label = "Data Saver",
-                icon = Icons.Default.Storage,
-                accentColor = Color(0xFF38EF7D),
-                modifier = Modifier.weight(1f)
-            ) {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                if (selectedMediaType == MediaType.VIDEO) {
-                    val lowest = videoQualityOptions.lastOrNull()?.height ?: 480
-                    selectedHeight = lowest
-                    selectedCodecName = "AV1"
-                } else {
-                    selectedAudioTier = "saver"
-                    selectedCodecName = "Opus"
-                }
-            }
-        }
-
-        // =========================================================================
-        // 5. STAGE 2: RESOLUTION / AUDIO QUALITY SELECTION GRID
-        // =========================================================================
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
                 Text(
-                    text = if (selectedMediaType == MediaType.VIDEO) "2. Select Resolution" else "2. Select Audio Quality",
+                    text = "1. Select Media Type",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF00E5FF)
+                    color = colorScheme.primary
                 )
 
-                Text(
-                    text = if (selectedMediaType == MediaType.VIDEO) "${videoQualityOptions.size} tiers available" else "Audiophile Grade",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF6B8799)
-                )
-            }
-
-            val currentOptions = if (selectedMediaType == MediaType.VIDEO) videoQualityOptions else audioQualityOptions
-
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                currentOptions.chunked(2).forEach { rowItems ->
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = colorScheme.surfaceContainer,
+                    border = BorderStroke(1.dp, colorScheme.outlineVariant)
+                ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        rowItems.forEach { item ->
-                            val isSelected = if (selectedMediaType == MediaType.VIDEO) {
-                                (selectedQuality?.height ?: -1) == item.height
-                            } else {
-                                selectedQuality?.bitrateKbps == item.bitrateKbps
-                            }
+                        val isVideo = selectedMediaType == MediaType.VIDEO
+                        val videoSource = remember { MutableInteractionSource() }
+                        val isVideoPressed by videoSource.collectIsPressedAsState()
+                        val videoScale by animateFloatAsState(
+                            targetValue = if (isVideoPressed) 0.97f else 1f,
+                            animationSpec = spring(stiffness = 500f),
+                            label = "videoScale"
+                        )
 
-                            val cardSource = remember { MutableInteractionSource() }
-                            val isCardPressed by cardSource.collectIsPressedAsState()
-                            val cardScale by animateFloatAsState(
-                                targetValue = if (isCardPressed) 0.96f else 1f,
-                                animationSpec = spring(stiffness = 500f),
-                                label = "cardScale"
-                            )
-
-                            Surface(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .graphicsLayer {
-                                        scaleX = cardScale
-                                        scaleY = cardScale
-                                    },
-                                shape = RoundedCornerShape(16.dp),
-                                color = if (isSelected) Color(0xFF082635) else Color(0xFF0A1824),
-                                border = BorderStroke(
-                                    width = if (isSelected) 1.5.dp else 1.dp,
-                                    color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF162D3E)
-                                ),
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    if (selectedMediaType == MediaType.VIDEO) {
-                                        selectedHeight = item.height
-                                    } else {
-                                        selectedAudioTier = when (item.bitrateKbps) {
-                                            320 -> "master"
-                                            256 -> "studio"
-                                            64 -> "saver"
-                                            else -> "standard"
-                                        }
-                                    }
-                                },
-                                interactionSource = cardSource
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    // Header: Label & Checkmark
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = item.label,
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isSelected) Color(0xFF00E5FF) else Color.White
-                                        )
-                                        if (isSelected) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(18.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color(0xFF00E5FF)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = "Selected",
-                                                    tint = Color(0xFF001F29),
-                                                    modifier = Modifier.size(12.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    // Size highlight
-                                    Text(
-                                        text = item.subLabel,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (isSelected) Color(0xFFC8EEF7) else Color(0xFF88A4B5)
-                                    )
-
-                                    // Badge Pill
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(item.badgeColor.copy(alpha = if (isSelected) 0.22f else 0.12f))
-                                            .border(
-                                                width = 1.dp,
-                                                color = item.badgeColor.copy(alpha = if (isSelected) 0.6f else 0.25f),
-                                                shape = RoundedCornerShape(6.dp)
-                                            )
-                                            .padding(horizontal = 7.dp, vertical = 2.5.dp)
-                                    ) {
-                                        Text(
-                                            text = item.badge,
-                                            fontSize = 10.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = item.badgeColor
-                                        )
-                                    }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .graphicsLayer {
+                                    scaleX = videoScale
+                                    scaleY = videoScale
                                 }
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isVideo) colorScheme.primaryContainer else Color.Transparent)
+                                .border(
+                                    width = if (isVideo) 1.5.dp else 0.dp,
+                                    color = if (isVideo) colorScheme.primary else Color.Transparent,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable(interactionSource = videoSource, indication = null) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedMediaType = MediaType.VIDEO
+                                }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isVideo) Icons.Default.CheckCircle else Icons.Default.Movie,
+                                    contentDescription = null,
+                                    tint = if (isVideo) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Video (with Audio)",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = if (isVideo) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isVideo) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant
+                                )
                             }
                         }
-                        if (rowItems.size == 1) {
-                            Spacer(modifier = Modifier.weight(1f))
+
+                        val isAudio = selectedMediaType == MediaType.AUDIO
+                        val audioSource = remember { MutableInteractionSource() }
+                        val isAudioPressed by audioSource.collectIsPressedAsState()
+                        val audioScale by animateFloatAsState(
+                            targetValue = if (isAudioPressed) 0.97f else 1f,
+                            animationSpec = spring(stiffness = 500f),
+                            label = "audioScale"
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .graphicsLayer {
+                                    scaleX = audioScale
+                                    scaleY = audioScale
+                                }
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isAudio) colorScheme.tertiaryContainer else Color.Transparent)
+                                .border(
+                                    width = if (isAudio) 1.5.dp else 0.dp,
+                                    color = if (isAudio) colorScheme.tertiary else Color.Transparent,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable(interactionSource = audioSource, indication = null) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedMediaType = MediaType.AUDIO
+                                }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isAudio) Icons.Default.CheckCircle else Icons.Default.Audiotrack,
+                                    contentDescription = null,
+                                    tint = if (isAudio) colorScheme.onTertiaryContainer else colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Audio Only",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = if (isAudio) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isAudio) colorScheme.onTertiaryContainer else colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // =========================================================================
-        // 6. STAGE 3: CODEC SELECTION (ENCODING & COMPRESSION ARCHITECTURE)
-        // =========================================================================
-        AnimatedVisibility(
-            visible = selectedQuality != null,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
-        ) {
+            // 4. FAST PRESET QUICK-PICKS
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                PresetQuickPill(
+                    label = "Best Quality",
+                    icon = Icons.Default.HighQuality,
+                    accentColor = extendedColors.warning,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    if (selectedMediaType == MediaType.VIDEO) {
+                        val highest = videoQualityOptions.firstOrNull()?.height ?: 1080
+                        selectedHeight = highest
+                        selectedCodecName = "AV1"
+                    } else {
+                        selectedAudioTier = "master"
+                        selectedCodecName = "M4A"
+                    }
+                }
+
+                PresetQuickPill(
+                    label = "Balanced",
+                    icon = Icons.Default.Bolt,
+                    accentColor = colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    if (selectedMediaType == MediaType.VIDEO) {
+                        val balanced = videoQualityOptions.find { it.height in 720..1080 }?.height ?: 1080
+                        selectedHeight = balanced
+                        selectedCodecName = "H.264"
+                    } else {
+                        selectedAudioTier = "standard"
+                        selectedCodecName = "M4A"
+                    }
+                }
+
+                PresetQuickPill(
+                    label = "Data Saver",
+                    icon = Icons.Default.Storage,
+                    accentColor = extendedColors.success,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    if (selectedMediaType == MediaType.VIDEO) {
+                        val lowest = videoQualityOptions.lastOrNull()?.height ?: 480
+                        selectedHeight = lowest
+                        selectedCodecName = "AV1"
+                    } else {
+                        selectedAudioTier = "saver"
+                        selectedCodecName = "Opus"
+                    }
+                }
+            }
+
+            // 5. STAGE 2: RESOLUTION / AUDIO QUALITY SELECTION GRID
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1404,126 +1177,273 @@ fun DownloadConfigContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "3. Select Encoding Codec",
+                        text = if (selectedMediaType == MediaType.VIDEO) "2. Select Resolution" else "2. Select Audio Quality",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF00E5FF)
+                        color = colorScheme.primary
                     )
+
                     Text(
-                        text = "Hardware Optimized",
+                        text = if (selectedMediaType == MediaType.VIDEO) "${videoQualityOptions.size} tiers available" else "Audiophile Grade",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF6B8799)
+                        color = colorScheme.onSurfaceVariant
                     )
                 }
 
-                val codecList = if (selectedMediaType == MediaType.VIDEO) videoCodecOptions else audioCodecOptions
+                val currentOptions = if (selectedMediaType == MediaType.VIDEO) videoQualityOptions else audioQualityOptions
 
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    codecList.forEach { codecOpt ->
-                        val isSelected = selectedCodec?.codecName == codecOpt.codecName
-                        val codecSource = remember { MutableInteractionSource() }
-                        val isCodecPressed by codecSource.collectIsPressedAsState()
-                        val codecScale by animateFloatAsState(
-                            targetValue = if (isCodecPressed) 0.98f else 1f,
-                            animationSpec = spring(stiffness = 500f),
-                            label = "codecScale"
-                        )
-
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .graphicsLayer {
-                                    scaleX = codecScale
-                                    scaleY = codecScale
-                                },
-                            shape = RoundedCornerShape(16.dp),
-                            color = if (isSelected) codecOpt.accentColor.copy(alpha = 0.12f) else Color(0xFF0A1824),
-                            border = BorderStroke(
-                                width = if (isSelected) 1.5.dp else 1.dp,
-                                color = if (isSelected) codecOpt.accentColor else Color(0xFF162D3E)
-                            ),
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                selectedCodecName = codecOpt.codecName
-                            },
-                            interactionSource = codecSource
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    currentOptions.chunked(2).forEach { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    // Glowing Radio Selector Ring
-                                    Box(
-                                        modifier = Modifier
-                                            .size(22.dp)
-                                            .clip(CircleShape)
-                                            .border(
-                                                width = 2.dp,
-                                                color = if (isSelected) codecOpt.accentColor else Color(0xFF334B5C),
-                                                shape = CircleShape
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (isSelected) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(10.dp)
-                                                    .clip(CircleShape)
-                                                    .background(codecOpt.accentColor)
-                                            )
-                                        }
-                                    }
+                            rowItems.forEach { item ->
+                                val isSelected = if (selectedMediaType == MediaType.VIDEO) {
+                                    (selectedQuality?.height ?: -1) == item.height
+                                } else {
+                                    selectedQuality?.bitrateKbps == item.bitrateKbps
+                                }
 
-                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                val cardSource = remember { MutableInteractionSource() }
+                                val isCardPressed by cardSource.collectIsPressedAsState()
+                                val cardScale by animateFloatAsState(
+                                    targetValue = if (isCardPressed) 0.96f else 1f,
+                                    animationSpec = spring(stiffness = 500f),
+                                    label = "cardScale"
+                                )
+
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .graphicsLayer {
+                                            scaleX = cardScale
+                                            scaleY = cardScale
+                                        },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = if (isSelected) colorScheme.primaryContainer.copy(alpha = 0.55f) else colorScheme.surfaceContainer,
+                                    border = BorderStroke(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) colorScheme.primary else colorScheme.outlineVariant
+                                    ),
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        if (selectedMediaType == MediaType.VIDEO) {
+                                            selectedHeight = item.height
+                                        } else {
+                                            selectedAudioTier = when (item.bitrateKbps) {
+                                                320 -> "master"
+                                                256 -> "studio"
+                                                64 -> "saver"
+                                                else -> "standard"
+                                            }
+                                        }
+                                    },
+                                    interactionSource = cardSource
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
                                         Row(
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = codecOpt.codecName,
-                                                style = MaterialTheme.typography.titleMedium,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                color = if (isSelected) codecOpt.accentColor else Color.White
+                                                text = item.label,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isSelected) colorScheme.onPrimaryContainer else colorScheme.onSurface
                                             )
-                                            Text(
-                                                text = "(${codecOpt.tag})",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = Color(0xFF6B8799)
-                                            )
+                                            if (isSelected) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(18.dp)
+                                                        .clip(CircleShape)
+                                                        .background(colorScheme.primary),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = colorScheme.onPrimary,
+                                                        modifier = Modifier.size(12.dp)
+                                                    )
+                                                }
+                                            }
                                         }
 
                                         Text(
-                                            text = codecOpt.badge,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFF90AAB9),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            text = item.subLabel,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (isSelected) colorScheme.onPrimaryContainer.copy(alpha = 0.85f) else colorScheme.onSurfaceVariant
                                         )
+
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(item.badgeColor.copy(alpha = 0.14f))
+                                                .border(
+                                                    width = 1.dp,
+                                                    color = item.badgeColor.copy(alpha = 0.45f),
+                                                    shape = RoundedCornerShape(6.dp)
+                                                )
+                                                .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                                        ) {
+                                            Text(
+                                                text = item.badge,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = item.badgeColor
+                                            )
+                                        }
                                     }
                                 }
+                            }
+                            if (rowItems.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
 
-                                // Size badge
-                                Box(
+            // 6. STAGE 3: CODEC SELECTION
+            AnimatedVisibility(
+                visible = selectedQuality != null,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "3. Select Encoding Codec",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = colorScheme.primary
+                        )
+                        Text(
+                            text = "Hardware Optimized",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    val codecList = if (selectedMediaType == MediaType.VIDEO) videoCodecOptions else audioCodecOptions
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        codecList.forEach { codecOpt ->
+                            val isSelected = selectedCodec?.codecName == codecOpt.codecName
+                            val codecSource = remember { MutableInteractionSource() }
+                            val isCodecPressed by codecSource.collectIsPressedAsState()
+                            val codecScale by animateFloatAsState(
+                                targetValue = if (isCodecPressed) 0.98f else 1f,
+                                animationSpec = spring(stiffness = 500f),
+                                label = "codecScale"
+                            )
+
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .graphicsLayer {
+                                        scaleX = codecScale
+                                        scaleY = codecScale
+                                    },
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isSelected) codecOpt.accentColor.copy(alpha = 0.12f) else colorScheme.surfaceContainer,
+                                border = BorderStroke(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) codecOpt.accentColor else colorScheme.outlineVariant
+                                ),
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedCodecName = codecOpt.codecName
+                                },
+                                interactionSource = codecSource
+                            ) {
+                                Row(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(codecOpt.accentColor.copy(alpha = 0.15f))
-                                        .border(1.dp, codecOpt.accentColor.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = codecOpt.sizeText,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        color = codecOpt.accentColor
-                                    )
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(22.dp)
+                                                .clip(CircleShape)
+                                                .border(
+                                                    width = 2.dp,
+                                                    color = if (isSelected) codecOpt.accentColor else colorScheme.outline,
+                                                    shape = CircleShape
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isSelected) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(10.dp)
+                                                        .clip(CircleShape)
+                                                        .background(codecOpt.accentColor)
+                                                )
+                                            }
+                                        }
+
+                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = codecOpt.codecName,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = if (isSelected) codecOpt.accentColor else colorScheme.onSurface
+                                                )
+                                                Text(
+                                                    text = "(${codecOpt.tag})",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = colorScheme.onSurfaceVariant
+                                                )
+                                            }
+
+                                            Text(
+                                                text = codecOpt.badge,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(codecOpt.accentColor.copy(alpha = 0.14f))
+                                            .border(1.dp, codecOpt.accentColor.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    ) {
+                                        Text(
+                                            text = codecOpt.sizeText,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            color = codecOpt.accentColor
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1531,16 +1451,13 @@ fun DownloadConfigContent(
                 }
             }
         }
-    }
 
-        // =========================================================================
-        // 7. ADVANCED DOWNLOAD CONFIGURATION (COLLAPSIBLE TURBO CARD)
-        // =========================================================================
+        // 7. ADVANCED DOWNLOAD CONFIGURATION
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0A1824)),
-            border = BorderStroke(1.dp, Color(0xFF162D3E))
+            colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainer),
+            border = BorderStroke(1.dp, colorScheme.outlineVariant)
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Row(
@@ -1560,7 +1477,7 @@ fun DownloadConfigContent(
                         Icon(
                             imageVector = Icons.Default.Tune,
                             contentDescription = null,
-                            tint = Color(0xFF00E5FF),
+                            tint = colorScheme.primary,
                             modifier = Modifier.size(20.dp)
                         )
                         Column {
@@ -1568,12 +1485,12 @@ fun DownloadConfigContent(
                                 text = "Advanced Download Options",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = colorScheme.onSurface
                             )
                             Text(
                                 text = "$selectedThreadCount Parallel Threads • ${if (isWifiOnly) "Wi-Fi Only" else "All Networks"}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF7591A3)
+                                color = colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -1582,7 +1499,7 @@ fun DownloadConfigContent(
                         Icon(
                             imageVector = if (isAdvancedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                             contentDescription = null,
-                            tint = Color(0xFF00E5FF)
+                            tint = colorScheme.primary
                         )
                     }
                 }
@@ -1594,9 +1511,8 @@ fun DownloadConfigContent(
                             .padding(top = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        HorizontalDivider(color = Color(0xFF162D3E))
+                        HorizontalDivider(color = colorScheme.outlineVariant)
 
-                        // Thread Count Turbo Controller
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1611,13 +1527,13 @@ fun DownloadConfigContent(
                                         modifier = Modifier
                                             .size(24.dp)
                                             .clip(RoundedCornerShape(6.dp))
-                                            .background(Color(0xFF00E5FF).copy(alpha = 0.12f)),
+                                            .background(colorScheme.primaryContainer),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Bolt,
                                             contentDescription = null,
-                                            tint = Color(0xFF00E5FF),
+                                            tint = colorScheme.onPrimaryContainer,
                                             modifier = Modifier.size(15.dp)
                                         )
                                     }
@@ -1625,7 +1541,7 @@ fun DownloadConfigContent(
                                         text = "Multi-Socket Accelerator",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = Color.White
+                                        color = colorScheme.onSurface
                                     )
                                 }
 
@@ -1633,34 +1549,28 @@ fun DownloadConfigContent(
                                     text = "$selectedThreadCount Turbo Sockets",
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00E5FF)
+                                    color = colorScheme.primary
                                 )
                             }
 
                             Text(
                                 text = "Splits download into concurrent parallel parts to bypass ISP single-stream throttles.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF7591A3)
+                                color = colorScheme.onSurfaceVariant
                             )
 
                             Slider(
                                 value = selectedThreadCount.toFloat(),
                                 onValueChange = { selectedThreadCount = it.roundToInt() },
                                 valueRange = 1f..16f,
-                                steps = 14,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = Color(0xFF00E5FF),
-                                    activeTrackColor = Color(0xFF00E5FF),
-                                    inactiveTrackColor = Color(0xFF1A3345)
-                                )
+                                steps = 14
                             )
                         }
 
-                        // Wi-Fi Only Toggle (Enhanced pill container with zero text-switch overlap)
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFF07131D),
-                            border = BorderStroke(1.dp, Color(0xFF162D3E)),
+                            color = colorScheme.surfaceContainerLow,
+                            border = BorderStroke(1.dp, colorScheme.outlineVariant),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
@@ -1681,13 +1591,13 @@ fun DownloadConfigContent(
                                         modifier = Modifier
                                             .size(34.dp)
                                             .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFF00E5FF).copy(alpha = 0.12f)),
+                                            .background(colorScheme.primaryContainer),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Wifi,
                                             contentDescription = null,
-                                            tint = Color(0xFF00E5FF),
+                                            tint = colorScheme.onPrimaryContainer,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
@@ -1696,13 +1606,13 @@ fun DownloadConfigContent(
                                             text = "Download on Wi-Fi Only",
                                             style = MaterialTheme.typography.bodyMedium.copy(
                                                 fontWeight = FontWeight.Bold,
-                                                color = Color.White
+                                                color = colorScheme.onSurface
                                             )
                                         )
                                         Text(
                                             text = "Wait for Wi-Fi connection to prevent cellular data charges",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFF7591A3)
+                                            color = colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
@@ -1712,35 +1622,28 @@ fun DownloadConfigContent(
                                     onCheckedChange = {
                                         isWifiOnly = it
                                         appSettings.wifiOnlyDownloads = it
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color(0xFF00E5FF),
-                                        checkedTrackColor = Color(0xFF004D59),
-                                        uncheckedThumbColor = Color(0xFF6B8799),
-                                        uncheckedTrackColor = Color(0xFF142B3A)
-                                    )
+                                    }
                                 )
                             }
                         }
 
-                        // Destination Directory
                         OutlinedTextField(
                             value = destinationFolder,
                             onValueChange = { destinationFolder = it },
-                            label = { Text("Save Destination Directory", color = Color(0xFF7591A3)) },
+                            label = { Text("Save Destination Directory") },
                             leadingIcon = {
-                                Icon(Icons.Default.Folder, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Folder, contentDescription = null, tint = colorScheme.primary, modifier = Modifier.size(18.dp))
                             },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF00E5FF),
-                                unfocusedBorderColor = Color(0xFF1B3244),
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedContainerColor = Color(0xFF07121B),
-                                unfocusedContainerColor = Color(0xFF07121B)
+                                focusedBorderColor = colorScheme.primary,
+                                unfocusedBorderColor = colorScheme.outlineVariant,
+                                focusedTextColor = colorScheme.onSurface,
+                                unfocusedTextColor = colorScheme.onSurface,
+                                focusedContainerColor = colorScheme.surface,
+                                unfocusedContainerColor = colorScheme.surface
                             )
                         )
                     }
@@ -1748,9 +1651,7 @@ fun DownloadConfigContent(
             }
         }
 
-        // =========================================================================
-        // 8. PRIMARY ACTION CTA BUTTON (ELECTRIC GLOWING PILL)
-        // =========================================================================
+        // 8. PRIMARY ACTION CTA BUTTON
         val buttonSource = remember { MutableInteractionSource() }
         val isButtonPressed by buttonSource.collectIsPressedAsState()
         val buttonScale by animateFloatAsState(
@@ -1758,116 +1659,105 @@ fun DownloadConfigContent(
             animationSpec = spring(stiffness = 500f),
             label = "buttonScale"
         )
+        val ctaContainerColor = if (selectedMediaType == MediaType.DIRECT_FILE) extendedColors.success else colorScheme.primary
+        val ctaContentColor = if (selectedMediaType == MediaType.DIRECT_FILE) extendedColors.onSuccess else colorScheme.onPrimary
 
-        Box(
+        Button(
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+
+                val fullFileName = if (editableFileName.endsWith(".$finalExtension", ignoreCase = true)) {
+                    editableFileName
+                } else {
+                    "$editableFileName.$finalExtension"
+                }
+
+                val downloadUrl = if (selectedMediaType == MediaType.DIRECT_FILE) {
+                    detectedMedia.directFileVariant?.url ?: detectedMedia.directFileUrl ?: detectedMedia.pageUrl
+                } else {
+                    selectedCodec?.matchedVariant?.url
+                        ?: selectedQuality?.matchedVariant?.url
+                        ?: detectedMedia.directFileUrl
+                }
+
+                if (downloadUrl == null) {
+                    Toast.makeText(context, "No stream URL found for download", Toast.LENGTH_SHORT).show()
+                    return@Button
+                }
+
+                val pairedAudioUrl = if (selectedMediaType == MediaType.DIRECT_FILE) null else {
+                    selectedCodec?.matchedVariant?.pairedAudioStreamUrl
+                        ?: selectedQuality?.matchedVariant?.pairedAudioStreamUrl
+                }
+
+                val formatId = if (selectedMediaType == MediaType.DIRECT_FILE) "direct" else {
+                    selectedCodec?.matchedVariant?.formatId
+                        ?: selectedQuality?.matchedVariant?.formatId
+                }
+
+                onEnqueueDownload(
+                    detectedMedia.pageTitle,
+                    fullFileName,
+                    downloadUrl,
+                    pairedAudioUrl,
+                    selectedMediaType,
+                    finalQualityLabel,
+                    finalCodecName,
+                    selectedThreadCount,
+                    destinationFolder,
+                    finalTotalBytes,
+                    detectedMedia.pageUrl,
+                    formatId
+                )
+                onDismiss()
+            },
+            interactionSource = buttonSource,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
                 .graphicsLayer {
                     scaleX = buttonScale
                     scaleY = buttonScale
-                }
-                .shadow(16.dp, RoundedCornerShape(16.dp), spotColor = if (selectedMediaType == MediaType.DIRECT_FILE) Color(0x6600E676) else Color(0x6600E5FF))
-                .clip(RoundedCornerShape(16.dp))
-                .background(
-                    Brush.horizontalGradient(
-                        if (selectedMediaType == MediaType.DIRECT_FILE) {
-                            listOf(Color(0xFF00E676), Color(0xFF00B0FF))
-                        } else {
-                            listOf(Color(0xFF00E5FF), Color(0xFF0084FF))
-                        }
-                    )
-                )
-                .clickable(interactionSource = buttonSource, indication = null) {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-
-                    val fullFileName = if (editableFileName.endsWith(".$finalExtension", ignoreCase = true)) {
-                        editableFileName
-                    } else {
-                        "$editableFileName.$finalExtension"
-                    }
-
-                    val downloadUrl = if (selectedMediaType == MediaType.DIRECT_FILE) {
-                        detectedMedia.directFileVariant?.url ?: detectedMedia.directFileUrl ?: detectedMedia.pageUrl
-                    } else {
-                        selectedCodec?.matchedVariant?.url
-                            ?: selectedQuality?.matchedVariant?.url
-                            ?: detectedMedia.directFileUrl
-                    }
-
-                    if (downloadUrl == null) {
-                        Toast.makeText(context, "No stream URL found for download", Toast.LENGTH_SHORT).show()
-                        return@clickable
-                    }
-
-                    val pairedAudioUrl = if (selectedMediaType == MediaType.DIRECT_FILE) null else {
-                        selectedCodec?.matchedVariant?.pairedAudioStreamUrl
-                            ?: selectedQuality?.matchedVariant?.pairedAudioStreamUrl
-                    }
-
-                    val formatId = if (selectedMediaType == MediaType.DIRECT_FILE) "direct" else {
-                        selectedCodec?.matchedVariant?.formatId
-                            ?: selectedQuality?.matchedVariant?.formatId
-                    }
-
-                    onEnqueueDownload(
-                        detectedMedia.pageTitle,
-                        fullFileName,
-                        downloadUrl,
-                        pairedAudioUrl,
-                        selectedMediaType,
-                        finalQualityLabel,
-                        finalCodecName,
-                        selectedThreadCount,
-                        destinationFolder,
-                        finalTotalBytes,
-                        detectedMedia.pageUrl,
-                        formatId
-                    )
-                    onDismiss()
                 },
-            contentAlignment = Alignment.Center
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = ctaContainerColor,
+                contentColor = ctaContentColor
+            )
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Download,
-                    contentDescription = null,
-                    tint = Color(0xFF001F29),
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (selectedMediaType == MediaType.DIRECT_FILE) {
-                        "Download ${detectedExtension.uppercase(Locale.ROOT)} (${if (finalTotalBytes > 0) MediaSizeCalculator.formatFileSize(finalTotalBytes) else "Direct File"})"
-                    } else {
-                        "Download $finalQualityLabel • $finalCodecName (${MediaSizeCalculator.formatFileSize(finalTotalBytes)})"
-                    },
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF001F29)
-                    )
-                )
-            }
+            Icon(
+                imageVector = Icons.Default.Download,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = if (selectedMediaType == MediaType.DIRECT_FILE) {
+                    "Download ${detectedExtension.uppercase(Locale.ROOT)} (${if (finalTotalBytes > 0) MediaSizeCalculator.formatFileSize(finalTotalBytes) else "Direct File"})"
+                } else {
+                    "Download $finalQualityLabel • $finalCodecName (${MediaSizeCalculator.formatFileSize(finalTotalBytes)})"
+                },
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.ExtraBold
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
 
         Spacer(modifier = Modifier.height(28.dp))
     }
 }
 
-/**
- * Fast Preset Quick-Pick Pill Button
- */
 @Composable
 private fun PresetQuickPill(
     label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     accentColor: Color,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -1883,8 +1773,8 @@ private fun PresetQuickPill(
                 scaleY = scale
             },
         shape = RoundedCornerShape(12.dp),
-        color = Color(0xFF0A1824),
-        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f)),
+        color = colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.4f)),
         onClick = onClick,
         interactionSource = interactionSource
     ) {
@@ -1904,15 +1794,15 @@ private fun PresetQuickPill(
                 text = label,
                 fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = colorScheme.onSurface
             )
         }
     }
 }
 
-@Preview(showBackground = true)
+@Preview(name = "Download Config - Light", showBackground = true)
 @Composable
-fun DownloadConfigBottomSheetPreview() {
+fun DownloadConfigBottomSheetLightPreview() {
     val sampleDetected = DetectedPageMedia(
         pageTitle = "Gemini 4 Carbon Is Here _Fully Test",
         pageUrl = "https://m.youtube.com/watch?v=sample",
@@ -1963,10 +1853,45 @@ fun DownloadConfigBottomSheetPreview() {
         )
     )
 
-    com.universal.dm.ui.theme.UDMTheme {
-        Surface(
-            color = Color(0xFF07121B)
-        ) {
+    UDMTheme(darkTheme = false, dynamicColor = false) {
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
+            DownloadConfigContent(
+                detectedMedia = sampleDetected,
+                onDismiss = {},
+                onEnqueueDownload = { _, _, _, _, _, _, _, _, _, _, _, _ -> }
+            )
+        }
+    }
+}
+
+@Preview(name = "Download Config - Dark", showBackground = true)
+@Composable
+fun DownloadConfigBottomSheetDarkPreview() {
+    val sampleDetected = DetectedPageMedia(
+        pageTitle = "Gemini 4 Carbon Is Here _Fully Test",
+        pageUrl = "https://m.youtube.com/watch?v=sample",
+        thumbnailUrl = null,
+        durationSeconds = 1066,
+        videoVariants = listOf(
+            StreamVariant(
+                formatId = "av01_4k",
+                url = "https://example.com/video_4k.mp4",
+                mediaType = MediaType.VIDEO,
+                qualityLabel = "2160p 4K",
+                resolutionHeight = 2160,
+                bitrateKbps = 15000,
+                videoCodec = VideoCodec.AV1,
+                audioCodec = null,
+                containerExt = "mp4",
+                fileSizeBytes = 2810000000L,
+                requiresAudioMerge = true
+            )
+        ),
+        audioVariants = emptyList()
+    )
+
+    UDMTheme(darkTheme = true, dynamicColor = false) {
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
             DownloadConfigContent(
                 detectedMedia = sampleDetected,
                 onDismiss = {},

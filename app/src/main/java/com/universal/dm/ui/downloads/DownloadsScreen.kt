@@ -1,7 +1,9 @@
 package com.universal.dm.ui.downloads
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.CubicBezierEasing
@@ -21,17 +23,10 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -56,36 +51,39 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FolderZip
-import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -101,6 +99,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -111,12 +110,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -126,38 +125,22 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.fillMaxHeight
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.os.Environment
-import androidx.core.content.FileProvider
-import java.io.File
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
-import androidx.compose.material3.TextButton
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.universal.dm.ui.finished.Media3PlayerDialog
 import com.universal.dm.data.local.DownloadChunkEntity
 import com.universal.dm.data.local.DownloadTaskEntity
 import com.universal.dm.data.model.DownloadStatus
 import com.universal.dm.data.model.MediaType
 import com.universal.dm.domain.downloader.DownloadEngineHelper
-import com.universal.dm.ui.theme.CodecAv1Badge
-import com.universal.dm.ui.theme.CodecM4aBadge
-import com.universal.dm.ui.theme.SpeedBadgeColor
+import com.universal.dm.domain.sniffer.MediaSizeCalculator
+import com.universal.dm.ui.finished.Media3PlayerDialog
 import com.universal.dm.ui.theme.UDMTheme
+import com.universal.dm.ui.theme.UdmTheme
+import java.io.File
 import java.net.URI
 import java.util.Locale
 
@@ -275,6 +258,7 @@ fun DownloadsScreenContent(
     onEnqueueManualDownload: (String, String, Int) -> Unit
 ) {
     val context = LocalContext.current
+    val colorScheme = MaterialTheme.colorScheme
     var searchQuery by remember { mutableStateOf("") }
     var isSearchExpanded by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf("All") }
@@ -351,6 +335,7 @@ fun DownloadsScreenContent(
     ) {
         // 1. TOP HEADER WITH CONTROLS & SEARCH TOGGLE
         item {
+            val completedCount = tasks.count { it.status == DownloadStatus.COMPLETED }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -358,90 +343,68 @@ fun DownloadsScreenContent(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-            val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
-            val completedCount = tasks.count { it.status == DownloadStatus.COMPLETED }
-
-            Column {
-                Text(
-                    text = "Downloads",
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = (-0.5).sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = if (activeRunningCount > 0)
-                        "$activeRunningCount active • $completedCount completed • ${DownloadEngineHelper.formatSpeed(totalCurrentSpeed)}"
-                    else if (completedCount > 0)
-                        "$completedCount completed downloads • Idle"
-                    else
-                        "Multi-thread parallel engine • Idle",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (activeRunningCount > 0) {
-                        if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary
-                    } else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Search toggle button
-                val searchBtnBg = if (isSearchExpanded) {
-                    if (isDark) Color(0xFF00E5FF).copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    if (isDark) Color(0xFF0C1924) else MaterialTheme.colorScheme.surfaceContainerHigh
+                Column {
+                    Text(
+                        text = "Downloads",
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = (-0.5).sp
+                        ),
+                        color = colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (activeRunningCount > 0)
+                            "$activeRunningCount active • $completedCount completed • ${DownloadEngineHelper.formatSpeed(totalCurrentSpeed)}"
+                        else if (completedCount > 0)
+                            "$completedCount completed downloads • Idle"
+                        else
+                            "Multi-thread parallel engine • Idle",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (activeRunningCount > 0) colorScheme.primary else colorScheme.onSurfaceVariant
+                    )
                 }
-                val searchBtnBorder = if (isSearchExpanded) {
-                    BorderStroke(1.dp, if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary)
-                } else {
-                    BorderStroke(1.dp, if (isDark) Color(0xFF1B3547) else MaterialTheme.colorScheme.outlineVariant)
-                }
-                val searchBtnTint = if (isSearchExpanded) {
-                    if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.onPrimaryContainer
-                } else MaterialTheme.colorScheme.onSurfaceVariant
 
-                Surface(
-                    onClick = { isSearchExpanded = !isSearchExpanded },
-                    shape = CircleShape,
-                    color = searchBtnBg,
-                    border = searchBtnBorder,
-                    modifier = Modifier.size(38.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = if (isSearchExpanded) Icons.Default.Close else Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = searchBtnTint,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-
-                // More Menu
-                Box {
-                    val moreBtnBg = if (isDark) Color(0xFF0C1924) else MaterialTheme.colorScheme.surfaceContainerHigh
-                    val moreBtnBorder = BorderStroke(1.dp, if (isDark) Color(0xFF1B3547) else MaterialTheme.colorScheme.outlineVariant)
-
+                    // Search toggle button
                     Surface(
-                        onClick = { showMoreMenu = true },
+                        onClick = { isSearchExpanded = !isSearchExpanded },
                         shape = CircleShape,
-                        color = moreBtnBg,
-                        border = moreBtnBorder,
+                        color = if (isSearchExpanded) colorScheme.primaryContainer else colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, if (isSearchExpanded) colorScheme.primary else colorScheme.outlineVariant),
                         modifier = Modifier.size(38.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = Icons.Default.Tune,
-                                contentDescription = "Options",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                imageVector = if (isSearchExpanded) Icons.Default.Close else Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint = if (isSearchExpanded) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
                     }
+
+                    // More Menu
+                    Box {
+                        Surface(
+                            onClick = { showMoreMenu = true },
+                            shape = CircleShape,
+                            color = colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, colorScheme.outlineVariant),
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = "Options",
+                                    tint = colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
 
                         DropdownMenu(
                             expanded = showMoreMenu,
@@ -454,7 +417,7 @@ fun DownloadsScreenContent(
                                     showMoreMenu = false
                                 },
                                 leadingIcon = {
-                                    Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                    Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = colorScheme.error)
                                 }
                             )
                             DropdownMenuItem(
@@ -464,7 +427,7 @@ fun DownloadsScreenContent(
                                     showMoreMenu = false
                                 },
                                 leadingIcon = {
-                                    Icon(Icons.Default.ClearAll, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                    Icon(Icons.Default.ClearAll, contentDescription = null, tint = colorScheme.error)
                                 }
                             )
                         }
@@ -479,8 +442,8 @@ fun DownloadsScreenContent(
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFF0A1722),
-                    border = BorderStroke(1.dp, Color(0xFF183244))
+                    color = colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, colorScheme.outlineVariant)
                 ) {
                     Row(
                         modifier = Modifier
@@ -492,7 +455,7 @@ fun DownloadsScreenContent(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = null,
-                            tint = Color(0xFF00E5FF),
+                            tint = colorScheme.primary,
                             modifier = Modifier.size(18.dp)
                         )
 
@@ -502,16 +465,16 @@ fun DownloadsScreenContent(
                             modifier = Modifier.weight(1f),
                             singleLine = true,
                             textStyle = TextStyle(
-                                color = Color.White,
+                                color = colorScheme.onSurface,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium
                             ),
-                            cursorBrush = SolidColor(Color(0xFF00E5FF)),
+                            cursorBrush = SolidColor(colorScheme.primary),
                             decorationBox = { innerTextField ->
                                 if (searchQuery.isEmpty()) {
                                     Text(
                                         text = "Filter by title, URL or extension...",
-                                        style = TextStyle(color = Color(0xFF5D7486), fontSize = 14.sp)
+                                        style = TextStyle(color = colorScheme.onSurfaceVariant, fontSize = 14.sp)
                                     )
                                 }
                                 innerTextField()
@@ -522,7 +485,7 @@ fun DownloadsScreenContent(
                             Icon(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = "Clear",
-                                tint = Color(0xFF88A0B2),
+                                tint = colorScheme.onSurfaceVariant,
                                 modifier = Modifier
                                     .size(18.dp)
                                     .clickable { searchQuery = "" }
@@ -581,17 +544,17 @@ fun DownloadsScreenContent(
                         )
                         val chipEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
                         val chipBgColor by animateColorAsState(
-                            targetValue = if (isSelected) Color(0xFF00E5FF).copy(alpha = 0.15f) else Color(0xFF08141F),
+                            targetValue = if (isSelected) colorScheme.primaryContainer else colorScheme.surfaceContainerLow,
                             animationSpec = tween(180, easing = chipEasing),
                             label = "chipBgColor"
                         )
                         val chipBorderColor by animateColorAsState(
-                            targetValue = if (isSelected) Color(0xFF00E5FF) else Color(0xFF132838),
+                            targetValue = if (isSelected) colorScheme.primary else colorScheme.outlineVariant,
                             animationSpec = tween(180, easing = chipEasing),
                             label = "chipBorderColor"
                         )
                         val chipTextColor by animateColorAsState(
-                            targetValue = if (isSelected) Color(0xFF00E5FF) else Color(0xFF8BA2B4),
+                            targetValue = if (isSelected) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
                             animationSpec = tween(180, easing = chipEasing),
                             label = "chipTextColor"
                         )
@@ -628,7 +591,7 @@ fun DownloadsScreenContent(
                                         modifier = Modifier
                                             .clip(CircleShape)
                                             .background(
-                                                if (isSelected) Color(0xFF00E5FF) else Color(0xFF162D3D)
+                                                if (isSelected) colorScheme.primary else colorScheme.surfaceContainerHighest
                                             )
                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                     ) {
@@ -637,7 +600,7 @@ fun DownloadsScreenContent(
                                             style = TextStyle(
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (isSelected) Color(0xFF002733) else Color(0xFF8BA2B4)
+                                                color = if (isSelected) colorScheme.onPrimary else colorScheme.onSurfaceVariant
                                             )
                                         )
                                     }
@@ -661,7 +624,7 @@ fun DownloadsScreenContent(
                             modifier = Modifier
                                 .size(6.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF00E5FF))
+                                .background(colorScheme.primary)
                         )
                         Text(
                             text = when (selectedCategory) {
@@ -673,7 +636,7 @@ fun DownloadsScreenContent(
                                 else -> "All Downloads (${tasks.size})"
                             },
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF7591A3),
+                            color = colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -698,8 +661,8 @@ fun DownloadsScreenContent(
                                 scaleY = sortScale
                             },
                             shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFF08141F),
-                            border = BorderStroke(1.dp, Color(0xFF132838)),
+                            color = colorScheme.surfaceContainerLow,
+                            border = BorderStroke(1.dp, colorScheme.outlineVariant),
                             interactionSource = sortSource
                         ) {
                             Row(
@@ -710,18 +673,18 @@ fun DownloadsScreenContent(
                                 Icon(
                                     imageVector = Icons.Default.FilterList,
                                     contentDescription = "Sort",
-                                    tint = Color(0xFF00E5FF),
+                                    tint = colorScheme.primary,
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
                                     text = sortOrder.label,
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFFC7D7E2)
+                                    color = colorScheme.onSurface
                                 )
                                 Icon(
                                     imageVector = Icons.Default.ArrowDropDown,
                                     contentDescription = null,
-                                    tint = Color(0xFF8BA2B4),
+                                    tint = colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -729,8 +692,7 @@ fun DownloadsScreenContent(
 
                         DropdownMenu(
                             expanded = showSortMenu,
-                            onDismissRequest = { showSortMenu = false },
-                            modifier = Modifier.background(Color(0xFF0B1722))
+                            onDismissRequest = { showSortMenu = false }
                         ) {
                             DownloadSortOrder.entries.forEach { order ->
                                 DropdownMenuItem(
@@ -741,7 +703,7 @@ fun DownloadsScreenContent(
                                         ) {
                                             Text(
                                                 text = order.label,
-                                                color = if (sortOrder == order) Color(0xFF00E5FF) else Color.White,
+                                                color = if (sortOrder == order) colorScheme.primary else colorScheme.onSurface,
                                                 fontWeight = if (sortOrder == order) FontWeight.Bold else FontWeight.Normal
                                             )
                                             if (sortOrder == order) {
@@ -749,7 +711,7 @@ fun DownloadsScreenContent(
                                                 Icon(
                                                     imageVector = Icons.Default.Check,
                                                     contentDescription = null,
-                                                    tint = Color(0xFF00E5FF),
+                                                    tint = colorScheme.primary,
                                                     modifier = Modifier.size(16.dp)
                                                 )
                                             }
@@ -828,7 +790,7 @@ fun DownloadsScreenContent(
                     Text(
                         text = "Are you sure you want to remove \"${target.fileName.ifEmpty { target.title }}\"?",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = colorScheme.onSurfaceVariant
                     )
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -840,13 +802,13 @@ fun DownloadsScreenContent(
                         Checkbox(
                             checked = deleteFileFromDisk,
                             onCheckedChange = { deleteFileFromDisk = it },
-                            colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.error)
+                            colors = CheckboxDefaults.colors(checkedColor = colorScheme.error)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Also delete file from storage",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = colorScheme.onSurface
                         )
                     }
                 }
@@ -857,9 +819,9 @@ fun DownloadsScreenContent(
                         onDeleteTask(target, deleteFileFromDisk)
                         taskToDelete = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.buttonColors(containerColor = colorScheme.error)
                 ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.onError)
+                    Text("Delete", color = colorScheme.onError)
                 }
             },
             dismissButton = {
@@ -884,6 +846,7 @@ private fun GlowingSpeedIconPill(
     isDownloading: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     val pulseGlowAlpha = if (isDownloading) {
         val infiniteTransition = rememberInfiniteTransition(label = "PulseGlow")
         infiniteTransition.animateFloat(
@@ -904,14 +867,18 @@ private fun GlowingSpeedIconPill(
             .background(
                 Brush.radialGradient(
                     listOf(
-                        Color(0xFF00E5FF).copy(alpha = if (isDownloading) pulseGlowAlpha * 0.45f else 0.15f),
-                        Color(0xFF032233)
+                        if (isDownloading) {
+                            colorScheme.primaryContainer.copy(alpha = (0.4f + pulseGlowAlpha * 0.5f).coerceIn(0f, 1f))
+                        } else {
+                            colorScheme.surfaceContainerHigh
+                        },
+                        colorScheme.surfaceContainer
                     )
                 )
             )
             .border(
                 1.5.dp,
-                if (isDownloading) Color(0xFF00E5FF).copy(alpha = pulseGlowAlpha) else Color(0xFF133245),
+                if (isDownloading) colorScheme.primary.copy(alpha = pulseGlowAlpha) else colorScheme.outlineVariant,
                 CircleShape
             ),
         contentAlignment = Alignment.Center
@@ -919,7 +886,7 @@ private fun GlowingSpeedIconPill(
         Icon(
             imageVector = Icons.Default.Speed,
             contentDescription = null,
-            tint = if (isDownloading) Color(0xFF00E5FF) else Color(0xFF7593A5),
+            tint = if (isDownloading) colorScheme.primary else colorScheme.onSurfaceVariant,
             modifier = Modifier.size(26.dp)
         )
     }
@@ -939,34 +906,31 @@ fun QuantumThroughputHeroCard(
     onTogglePauseAll: () -> Unit,
     onAddNewDownload: () -> Unit
 ) {
-    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
-    val statCardBorder = if (isDark) {
-        BorderStroke(
-            1.dp,
+    val colorScheme = MaterialTheme.colorScheme
+    val extendedColors = UdmTheme.extendedColors
+    val statCardBorder = BorderStroke(
+        1.dp,
+        if (isDownloading) {
             Brush.horizontalGradient(
                 listOf(
-                    Color(0x4000E5FF),
-                    Color(0x2000B0FF),
-                    Color(0x1000E5FF)
+                    colorScheme.primary.copy(alpha = 0.55f),
+                    colorScheme.secondary.copy(alpha = 0.3f)
                 )
             )
-        )
-    } else {
-        BorderStroke(
-            1.dp,
+        } else {
             Brush.horizontalGradient(
                 listOf(
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
+                    colorScheme.outlineVariant,
+                    colorScheme.outlineVariant.copy(alpha = 0.6f)
                 )
             )
-        )
-    }
+        }
+    )
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(26.dp),
-        color = if (isDark) Color(0xFF08141F) else MaterialTheme.colorScheme.surfaceContainerLow,
+        color = colorScheme.surfaceContainerLow,
         border = statCardBorder
     ) {
         Column(
@@ -985,7 +949,6 @@ fun QuantumThroughputHeroCard(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Glowing Icon Pill (Isolated to prevent card-wide recomposition thrash)
                     GlowingSpeedIconPill(isDownloading = isDownloading)
 
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -999,14 +962,14 @@ fun QuantumThroughputHeroCard(
                                     fontWeight = FontWeight.ExtraBold,
                                     letterSpacing = 1.2.sp
                                 ),
-                                color = Color(0xFF7D9AB0)
+                                color = colorScheme.onSurfaceVariant
                             )
                             if (isDownloading) {
                                 Box(
                                     modifier = Modifier
                                         .size(6.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFF00E5FF))
+                                        .background(colorScheme.primary)
                                 )
                             }
                         }
@@ -1018,7 +981,7 @@ fun QuantumThroughputHeroCard(
                                 fontWeight = FontWeight.Black,
                                 letterSpacing = (-0.5).sp
                             ),
-                            color = if (isDownloading) Color(0xFF00E5FF) else Color.White
+                            color = if (isDownloading) colorScheme.primary else colorScheme.onSurface
                         )
                     }
                 }
@@ -1030,8 +993,8 @@ fun QuantumThroughputHeroCard(
                 ) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF0F2636),
-                        border = BorderStroke(1.dp, Color(0xFF1C425A))
+                        color = extendedColors.warningContainer,
+                        border = BorderStroke(1.dp, extendedColors.warning.copy(alpha = 0.35f))
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -1041,7 +1004,7 @@ fun QuantumThroughputHeroCard(
                             Icon(
                                 imageVector = Icons.Default.Bolt,
                                 contentDescription = null,
-                                tint = Color(0xFFFFD54F),
+                                tint = extendedColors.onWarningContainer,
                                 modifier = Modifier.size(13.dp)
                             )
                             Text(
@@ -1049,7 +1012,7 @@ fun QuantumThroughputHeroCard(
                                 style = TextStyle(
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFFFD54F)
+                                    color = extendedColors.onWarningContainer
                                 )
                             )
                         }
@@ -1060,7 +1023,7 @@ fun QuantumThroughputHeroCard(
                         style = TextStyle(
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFF7F9DB0)
+                            color = colorScheme.onSurfaceVariant
                         )
                     )
                 }
@@ -1095,8 +1058,8 @@ fun QuantumThroughputHeroCard(
                             scaleY = pauseScale
                         },
                     shape = RoundedCornerShape(14.dp),
-                    color = if (isDownloading) Color(0xFF1B2F3D) else Color(0xFF102838),
-                    border = BorderStroke(1.dp, Color(0xFF274A61)),
+                    color = if (isDownloading) colorScheme.secondaryContainer else colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, colorScheme.outlineVariant),
                     interactionSource = pauseButtonSource
                 ) {
                     Row(
@@ -1109,14 +1072,14 @@ fun QuantumThroughputHeroCard(
                         Icon(
                             imageVector = if (isDownloading) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = null,
-                            tint = if (isDownloading) Color(0xFFFFCC80) else Color(0xFF00E5FF),
+                            tint = if (isDownloading) extendedColors.warning else colorScheme.primary,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = if (isDownloading) "Pause All" else "Resume All",
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                            color = Color.White
+                            color = if (isDownloading) colorScheme.onSecondaryContainer else colorScheme.onSurface
                         )
                     }
                 }
@@ -1130,33 +1093,29 @@ fun QuantumThroughputHeroCard(
                     label = "addScale"
                 )
 
-                Box(
+                Surface(
+                    onClick = onAddNewDownload,
                     modifier = Modifier
                         .weight(1f)
                         .graphicsLayer {
                             scaleX = addScale
                             scaleY = addScale
-                        }
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(Color(0xFF00E5FF), Color(0xFF0084FF))
-                            )
-                        )
-                        .clickable(interactionSource = addSource, indication = null) {
-                            onAddNewDownload()
-                        }
-                        .padding(vertical = 12.dp),
-                    contentAlignment = Alignment.Center
+                        },
+                    shape = RoundedCornerShape(14.dp),
+                    color = colorScheme.primary,
+                    interactionSource = addSource
                 ) {
                     Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = null,
-                            tint = Color(0xFF002230),
+                            tint = colorScheme.onPrimary,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -1164,7 +1123,7 @@ fun QuantumThroughputHeroCard(
                             text = "Add Download",
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF002230)
+                                color = colorScheme.onPrimary
                             )
                         )
                     }
@@ -1182,6 +1141,14 @@ fun QuantumThroughputHeroCard(
 fun BandwidthActivityWaveform(
     isDownloading: Boolean
 ) {
+    val colorScheme = MaterialTheme.colorScheme
+    val extendedColors = UdmTheme.extendedColors
+    val inactiveColor = colorScheme.surfaceContainerHighest
+    val barColor0 = colorScheme.primary
+    val barColor1 = colorScheme.secondary
+    val barColor2 = extendedColors.success
+    val barColor3 = colorScheme.tertiary
+
     val barCount = 24
     val phaseState = if (isDownloading) {
         val transition = rememberInfiniteTransition(label = "WavePhase")
@@ -1216,11 +1183,11 @@ fun BandwidthActivityWaveform(
             }
 
             val barColor = when {
-                !isDownloading -> Color(0xFF132A39)
-                i % 4 == 0 -> Color(0xFF00E5FF)
-                i % 4 == 1 -> Color(0xFF00B0FF)
-                i % 4 == 2 -> Color(0xFF38EF7D)
-                else -> Color(0xFF11998E)
+                !isDownloading -> inactiveColor
+                i % 4 == 0 -> barColor0
+                i % 4 == 1 -> barColor1
+                i % 4 == 2 -> barColor2
+                else -> barColor3
             }
 
             val left = i * (barWidth + spacing)
@@ -1258,6 +1225,8 @@ fun LuxuryDownloadTaskCard(
     var isExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val colorScheme = MaterialTheme.colorScheme
+    val extendedColors = UdmTheme.extendedColors
 
     val isCompleted = task.status == DownloadStatus.COMPLETED
     val isPaused = task.status == DownloadStatus.PAUSED
@@ -1269,14 +1238,14 @@ fun LuxuryDownloadTaskCard(
         ((task.downloadedBytes * 100) / task.totalBytes).toInt().coerceIn(0, 100)
     } else 0
 
-    val etaSeconds = if (task.speedBytesPerSec > 0 && task.totalBytes > task.downloadedBytes) {
-        (task.totalBytes - task.downloadedBytes) / task.speedBytesPerSec
-    } else 0L
+    val etaSeconds = MediaSizeCalculator.calculateEtaSeconds(
+        downloadedBytes = task.downloadedBytes,
+        totalBytes = task.totalBytes,
+        speedBytesPerSec = task.speedBytesPerSec
+    )
 
-    val etaText = if (etaSeconds > 0) {
-        val m = etaSeconds / 60
-        val s = etaSeconds % 60
-        String.format(Locale.US, "%02d:%02d left", m, s)
+    val etaText = if (etaSeconds > 0L) {
+        MediaSizeCalculator.formatEta(etaSeconds)
     } else if (isMuxing) {
         "Muxing streams..."
     } else {
@@ -1303,10 +1272,20 @@ fun LuxuryDownloadTaskCard(
         }
     }
 
-    val themeColor = when (effectiveMediaType) {
-        MediaType.VIDEO -> Color(0xFF00E5FF)
-        MediaType.AUDIO -> Color(0xFFD05CE3)
-        MediaType.DIRECT_FILE -> Color(0xFF00E676)
+    val typeAccent = when (effectiveMediaType) {
+        MediaType.VIDEO -> colorScheme.primary
+        MediaType.AUDIO -> colorScheme.tertiary
+        MediaType.DIRECT_FILE -> extendedColors.success
+    }
+    val typeContainer = when (effectiveMediaType) {
+        MediaType.VIDEO -> colorScheme.primaryContainer
+        MediaType.AUDIO -> colorScheme.tertiaryContainer
+        MediaType.DIRECT_FILE -> extendedColors.successContainer
+    }
+    val typeOnContainer = when (effectiveMediaType) {
+        MediaType.VIDEO -> colorScheme.onPrimaryContainer
+        MediaType.AUDIO -> colorScheme.onTertiaryContainer
+        MediaType.DIRECT_FILE -> extendedColors.onSuccessContainer
     }
 
     // Extract domain host for display
@@ -1318,8 +1297,6 @@ fun LuxuryDownloadTaskCard(
             "Direct Stream"
         }
     }
-
-    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 
     Surface(
         modifier = modifier
@@ -1336,17 +1313,14 @@ fun LuxuryDownloadTaskCard(
                 } else Modifier
             ),
         shape = RoundedCornerShape(22.dp),
-        color = if (isDark) {
-            if (isCompleted) Color(0xFF071520) else Color(0xFF091622)
-        } else MaterialTheme.colorScheme.surfaceContainerLow,
+        color = colorScheme.surfaceContainerLow,
         border = BorderStroke(
             1.dp,
-            if (isDownloading) {
-                if (isDark) Color(0xFF1B3C52) else MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-            } else if (isCompleted) {
-                if (isDark) Color(0xFF0E2E28) else Color(0xFF00E676).copy(alpha = 0.3f)
-            } else {
-                if (isDark) Color(0xFF122432) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+            when {
+                isDownloading -> colorScheme.primary.copy(alpha = 0.5f)
+                isCompleted -> extendedColors.success.copy(alpha = 0.45f)
+                isFailed -> colorScheme.error.copy(alpha = 0.5f)
+                else -> colorScheme.outlineVariant
             }
         )
     ) {
@@ -1367,19 +1341,19 @@ fun LuxuryDownloadTaskCard(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Glowing Media Badge
+                    // Media Badge
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .clip(RoundedCornerShape(13.dp))
-                            .background(themeColor.copy(alpha = 0.15f))
-                            .border(1.dp, themeColor.copy(alpha = 0.4f), RoundedCornerShape(13.dp)),
+                            .background(typeContainer)
+                            .border(1.dp, typeAccent.copy(alpha = 0.35f), RoundedCornerShape(13.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = typeIcon,
                             contentDescription = null,
-                            tint = themeColor,
+                            tint = typeOnContainer,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -1394,7 +1368,7 @@ fun LuxuryDownloadTaskCard(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp
                             ),
-                            color = MaterialTheme.colorScheme.onSurface,
+                            color = colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1442,15 +1416,15 @@ fun LuxuryDownloadTaskCard(
                             if (badgeText.isNotBlank()) {
                                 Surface(
                                     shape = RoundedCornerShape(5.dp),
-                                    color = themeColor.copy(alpha = 0.14f),
-                                    border = BorderStroke(1.dp, themeColor.copy(alpha = 0.35f))
+                                    color = typeContainer,
+                                    border = BorderStroke(1.dp, typeAccent.copy(alpha = 0.3f))
                                 ) {
                                     Text(
                                         text = badgeText,
                                         style = TextStyle(
                                             fontSize = 9.5.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = themeColor,
+                                            color = typeOnContainer,
                                             letterSpacing = 0.4.sp
                                         ),
                                         maxLines = 1,
@@ -1466,7 +1440,7 @@ fun LuxuryDownloadTaskCard(
                                     style = TextStyle(
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xFF7F9CB0)
+                                        color = colorScheme.onSurfaceVariant
                                     ),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -1488,15 +1462,15 @@ fun LuxuryDownloadTaskCard(
                             Surface(
                                 onClick = onPlayPreview,
                                 shape = CircleShape,
-                                color = Color(0xFF00E5FF).copy(alpha = 0.18f),
-                                border = BorderStroke(1.dp, Color(0xFF00E5FF)),
+                                color = colorScheme.primaryContainer,
+                                border = BorderStroke(1.dp, colorScheme.primary.copy(alpha = 0.5f)),
                                 modifier = Modifier.size(36.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Default.PlayArrow,
                                         contentDescription = "Play Preview",
-                                        tint = Color(0xFF00E5FF),
+                                        tint = colorScheme.onPrimaryContainer,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -1507,15 +1481,15 @@ fun LuxuryDownloadTaskCard(
                         Surface(
                             onClick = onOpenFile,
                             shape = CircleShape,
-                            color = Color(0xFF00E676).copy(alpha = 0.18f),
-                            border = BorderStroke(1.dp, Color(0xFF00E676)),
+                            color = extendedColors.successContainer,
+                            border = BorderStroke(1.dp, extendedColors.success.copy(alpha = 0.5f)),
                             modifier = Modifier.size(36.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                                     contentDescription = "Open File",
-                                    tint = Color(0xFF00E676),
+                                    tint = extendedColors.onSuccessContainer,
                                     modifier = Modifier.size(17.dp)
                                 )
                             }
@@ -1525,15 +1499,15 @@ fun LuxuryDownloadTaskCard(
                         Surface(
                             onClick = onShare,
                             shape = CircleShape,
-                            color = Color(0xFF1B2F3D),
-                            border = BorderStroke(1.dp, Color(0xFF274A61)),
+                            color = colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, colorScheme.outlineVariant),
                             modifier = Modifier.size(36.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.Share,
                                     contentDescription = "Share",
-                                    tint = Color(0xFF88A0B2),
+                                    tint = colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -1543,15 +1517,15 @@ fun LuxuryDownloadTaskCard(
                         Surface(
                             onClick = onDelete,
                             shape = CircleShape,
-                            color = Color(0xFF20161A),
-                            border = BorderStroke(1.dp, Color(0xFF3E1F29)),
+                            color = colorScheme.errorContainer,
+                            border = BorderStroke(1.dp, colorScheme.error.copy(alpha = 0.4f)),
                             modifier = Modifier.size(36.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.Delete,
                                     contentDescription = "Delete",
-                                    tint = Color(0xFFFF5252),
+                                    tint = colorScheme.onErrorContainer,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -1566,15 +1540,15 @@ fun LuxuryDownloadTaskCard(
                             Surface(
                                 onClick = onRetry,
                                 shape = CircleShape,
-                                color = Color(0xFFFF5252).copy(alpha = 0.18f),
-                                border = BorderStroke(1.dp, Color(0xFFFF5252)),
+                                color = colorScheme.errorContainer,
+                                border = BorderStroke(1.dp, colorScheme.error),
                                 modifier = Modifier.size(36.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Default.Refresh,
                                         contentDescription = "Retry",
-                                        tint = Color(0xFFFF5252),
+                                        tint = colorScheme.onErrorContainer,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -1583,15 +1557,15 @@ fun LuxuryDownloadTaskCard(
                             Surface(
                                 onClick = if (isPaused) onResume else onPause,
                                 shape = CircleShape,
-                                color = if (isPaused) Color(0xFF00E5FF).copy(alpha = 0.18f) else Color(0xFF1B3242),
-                                border = BorderStroke(1.dp, if (isPaused) Color(0xFF00E5FF) else Color(0xFF284B61)),
+                                color = if (isPaused) colorScheme.primaryContainer else colorScheme.surfaceContainerHigh,
+                                border = BorderStroke(1.dp, if (isPaused) colorScheme.primary else colorScheme.outlineVariant),
                                 modifier = Modifier.size(36.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
                                         contentDescription = if (isPaused) "Resume" else "Pause",
-                                        tint = if (isPaused) Color(0xFF00E5FF) else Color.White,
+                                        tint = if (isPaused) colorScheme.onPrimaryContainer else colorScheme.onSurface,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -1601,15 +1575,15 @@ fun LuxuryDownloadTaskCard(
                         Surface(
                             onClick = onCancel,
                             shape = CircleShape,
-                            color = Color(0xFF1B242D),
-                            border = BorderStroke(1.dp, Color(0xFF2E3D4A)),
+                            color = colorScheme.errorContainer.copy(alpha = 0.7f),
+                            border = BorderStroke(1.dp, colorScheme.error.copy(alpha = 0.35f)),
                             modifier = Modifier.size(36.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Cancel",
-                                    tint = Color(0xFFFF7043),
+                                    tint = colorScheme.onErrorContainer,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -1631,14 +1605,14 @@ fun LuxuryDownloadTaskCard(
                         style = TextStyle(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF8BA6B9)
+                            color = colorScheme.onSurfaceVariant
                         )
                     )
 
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF00E676).copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, Color(0xFF00E676).copy(alpha = 0.4f))
+                        color = extendedColors.successContainer,
+                        border = BorderStroke(1.dp, extendedColors.success.copy(alpha = 0.4f))
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
@@ -1648,7 +1622,7 @@ fun LuxuryDownloadTaskCard(
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,
                                 contentDescription = null,
-                                tint = Color(0xFF00E676),
+                                tint = extendedColors.onSuccessContainer,
                                 modifier = Modifier.size(12.dp)
                             )
                             Text(
@@ -1656,7 +1630,7 @@ fun LuxuryDownloadTaskCard(
                                 style = TextStyle(
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00E676)
+                                    color = extendedColors.onSuccessContainer
                                 )
                             )
                         }
@@ -1676,7 +1650,7 @@ fun LuxuryDownloadTaskCard(
                             style = TextStyle(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = Color(0xFF8BA6B9)
+                                color = colorScheme.onSurfaceVariant
                             )
                         )
 
@@ -1685,7 +1659,12 @@ fun LuxuryDownloadTaskCard(
                             style = TextStyle(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = if (isFailed) Color(0xFFFF5252) else if (isPaused) Color(0xFFFFB74D) else Color(0xFF00E5FF)
+                                color = when {
+                                    isFailed -> colorScheme.error
+                                    isPaused -> extendedColors.warning
+                                    isMuxing -> colorScheme.tertiary
+                                    else -> colorScheme.primary
+                                }
                             )
                         )
                     }
@@ -1696,11 +1675,13 @@ fun LuxuryDownloadTaskCard(
                             .fillMaxWidth()
                             .height(8.dp)
                             .clip(RoundedCornerShape(4.dp)),
-                        color = if (isPaused) Color(0xFFFFB74D)
-                        else if (isFailed) Color(0xFFFF5252)
-                        else if (isMuxing) Color(0xFFBA68C8)
-                        else Color(0xFF00E5FF),
-                        trackColor = Color(0xFF112330)
+                        color = when {
+                            isPaused -> extendedColors.warning
+                            isFailed -> colorScheme.error
+                            isMuxing -> colorScheme.tertiary
+                            else -> colorScheme.primary
+                        },
+                        trackColor = colorScheme.surfaceContainerHighest
                     )
                 }
 
@@ -1728,11 +1709,13 @@ fun LuxuryDownloadTaskCard(
                             .size(6.dp)
                             .clip(CircleShape)
                             .background(
-                                if (isCompleted) Color(0xFF00E676)
-                                else if (isDownloading) Color(0xFF00E5FF)
-                                else if (isPaused) Color(0xFFFFB74D)
-                                else if (isFailed) Color(0xFFFF5252)
-                                else Color(0xFF7593A5)
+                                when {
+                                    isCompleted -> extendedColors.success
+                                    isDownloading -> colorScheme.primary
+                                    isPaused -> extendedColors.warning
+                                    isFailed -> colorScheme.error
+                                    else -> colorScheme.onSurfaceVariant
+                                }
                             )
                     )
                     Text(
@@ -1747,7 +1730,12 @@ fun LuxuryDownloadTaskCard(
                         style = TextStyle(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isCompleted) Color(0xFF00E676) else if (isDownloading) Color(0xFF00E5FF) else Color(0xFF90A4AE)
+                            color = when {
+                                isCompleted -> extendedColors.success
+                                isDownloading -> colorScheme.primary
+                                isFailed -> colorScheme.error
+                                else -> colorScheme.onSurfaceVariant
+                            }
                         )
                     )
                 }
@@ -1763,13 +1751,13 @@ fun LuxuryDownloadTaskCard(
                         style = TextStyle(
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF718C9E)
+                            color = colorScheme.onSurfaceVariant
                         )
                     )
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = null,
-                        tint = Color(0xFF718C9E),
+                        tint = colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -1786,8 +1774,8 @@ fun LuxuryDownloadTaskCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF061019))
-                        .border(1.dp, Color(0xFF112330), RoundedCornerShape(14.dp))
+                        .background(colorScheme.surfaceContainer)
+                        .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(14.dp))
                         .padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
@@ -1800,11 +1788,11 @@ fun LuxuryDownloadTaskCard(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "DESTINATION STORAGE",
-                                style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF5D788C))
+                                style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = colorScheme.onSurfaceVariant)
                             )
                             Text(
                                 text = task.filePath,
-                                style = TextStyle(fontSize = 12.sp, color = Color(0xFFCFDCE5)),
+                                style = TextStyle(fontSize = 12.sp, color = colorScheme.onSurface),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1817,7 +1805,7 @@ fun LuxuryDownloadTaskCard(
                             },
                             modifier = Modifier.size(30.dp)
                         ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy Path", tint = Color(0xFF00E5FF), modifier = Modifier.size(15.dp))
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy Path", tint = colorScheme.primary, modifier = Modifier.size(15.dp))
                         }
                     }
 
@@ -1830,11 +1818,11 @@ fun LuxuryDownloadTaskCard(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "SOURCE STREAM URL",
-                                style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF5D788C))
+                                style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = colorScheme.onSurfaceVariant)
                             )
                             Text(
                                 text = task.sourcePageUrl,
-                                style = TextStyle(fontSize = 12.sp, color = Color(0xFFCFDCE5)),
+                                style = TextStyle(fontSize = 12.sp, color = colorScheme.onSurface),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1847,22 +1835,22 @@ fun LuxuryDownloadTaskCard(
                             },
                             modifier = Modifier.size(30.dp)
                         ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy URL", tint = Color(0xFF00E5FF), modifier = Modifier.size(15.dp))
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy URL", tint = colorScheme.primary, modifier = Modifier.size(15.dp))
                         }
                     }
 
                     // Chunk Breakdown
                     if (chunks.isNotEmpty() && !isCompleted) {
-                        HorizontalDivider(color = Color(0xFF112330))
+                        HorizontalDivider(color = colorScheme.outlineVariant)
                         Text(
                             text = "SOCKET CHUNK TABLE (${chunks.size} Active Chunks)",
-                            style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF5D788C))
+                            style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = colorScheme.onSurfaceVariant)
                         )
 
                         chunks.take(4).forEach { chunk ->
-                            val cLength = (chunk.endByte - chunk.startByte).coerceAtLeast(1L)
-                            val cDone = (chunk.currentByte - chunk.startByte).coerceAtLeast(0L)
-                            val cPct = ((cDone * 100) / cLength).toInt().coerceIn(0, 100)
+                            val cLength = (chunk.endByte - chunk.startByte + 1L).coerceAtLeast(1L)
+                            val cDone = (chunk.currentByte - chunk.startByte).coerceIn(0L, cLength)
+                            val cPct = if (chunk.isCompleted) 100 else ((cDone * 100L) / cLength).toInt().coerceIn(0, 100)
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1870,14 +1858,14 @@ fun LuxuryDownloadTaskCard(
                             ) {
                                 Text(
                                     text = "Thread #${chunk.threadIndex}",
-                                    style = TextStyle(fontSize = 11.sp, color = Color(0xFF8BA6B9), fontFamily = FontFamily.Monospace)
+                                    style = TextStyle(fontSize = 11.sp, color = colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
                                 )
                                 Text(
                                     text = if (chunk.isCompleted) "Completed" else "$cPct%",
                                     style = TextStyle(
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (chunk.isCompleted) Color(0xFF00E676) else Color(0xFF00E5FF),
+                                        color = if (chunk.isCompleted) extendedColors.success else colorScheme.primary,
                                         fontFamily = FontFamily.Monospace
                                     )
                                 )
@@ -1900,7 +1888,9 @@ fun IdmSegmentedThreadBarModern(
     isPaused: Boolean,
     isDownloading: Boolean
 ) {
-    val count = threadCount.coerceIn(1, 16)
+    val colorScheme = MaterialTheme.colorScheme
+    val extendedColors = UdmTheme.extendedColors
+    val count = if (chunks.isNotEmpty()) chunks.size.coerceIn(1, 16) else threadCount.coerceIn(1, 16)
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
@@ -1910,12 +1900,16 @@ fun IdmSegmentedThreadBarModern(
         ) {
             Text(
                 text = "$count Parallel Thread Sockets",
-                style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF718C9E))
+                style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurfaceVariant)
             )
 
             Text(
                 text = if (isDownloading) "Turbo Multi-Part Active" else if (isPaused) "Socket Pool Paused" else "Ready",
-                style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (isDownloading) Color(0xFF00E5FF) else Color(0xFF718C9E))
+                style = TextStyle(
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDownloading) colorScheme.primary else colorScheme.onSurfaceVariant
+                )
             )
         }
 
@@ -1926,9 +1920,13 @@ fun IdmSegmentedThreadBarModern(
             for (i in 0 until count) {
                 val chunk = chunks.find { it.threadIndex == i }
                 val chunkProgress = if (chunk != null) {
-                    val length = (chunk.endByte - chunk.startByte).coerceAtLeast(1L)
-                    val done = (chunk.currentByte - chunk.startByte).coerceAtLeast(0L)
-                    (done.toFloat() / length).coerceIn(0f, 1f)
+                    if (chunk.isCompleted) {
+                        1f
+                    } else {
+                        val length = (chunk.endByte - chunk.startByte + 1L).coerceAtLeast(1L)
+                        val done = (chunk.currentByte - chunk.startByte).coerceIn(0L, length)
+                        (done.toFloat() / length.toFloat()).coerceIn(0f, 1f)
+                    }
                 } else {
                     0f
                 }
@@ -1939,10 +1937,12 @@ fun IdmSegmentedThreadBarModern(
                         .weight(1f)
                         .height(6.dp)
                         .clip(RoundedCornerShape(3.dp)),
-                    color = if (isPaused) Color(0xFF455A64)
-                    else if (chunk?.isCompleted == true) Color(0xFF00E676)
-                    else Color(0xFF00E5FF),
-                    trackColor = Color(0xFF10222F)
+                    color = when {
+                        isPaused -> colorScheme.outline
+                        chunk?.isCompleted == true -> extendedColors.success
+                        else -> colorScheme.primary
+                    },
+                    trackColor = colorScheme.surfaceContainerHighest
                 )
             }
         }
@@ -1958,13 +1958,14 @@ fun EmptyQueueStateCard(
     selectedCategory: String,
     onOpenNewDownload: () -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 16.dp),
         shape = RoundedCornerShape(26.dp),
-        color = Color(0xFF08141F),
-        border = BorderStroke(1.dp, Color(0xFF132838))
+        color = colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, colorScheme.outlineVariant)
     ) {
         Column(
             modifier = Modifier
@@ -1977,18 +1978,14 @@ fun EmptyQueueStateCard(
                 modifier = Modifier
                     .size(68.dp)
                     .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            listOf(Color(0xFF00E5FF).copy(alpha = 0.2f), Color(0xFF0B2131))
-                        )
-                    )
-                    .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f), CircleShape),
+                    .background(colorScheme.primaryContainer)
+                    .border(1.dp, colorScheme.primary.copy(alpha = 0.4f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.DownloadDone,
                     contentDescription = null,
-                    tint = Color(0xFF00E5FF),
+                    tint = colorScheme.onPrimaryContainer,
                     modifier = Modifier.size(34.dp)
                 )
             }
@@ -2003,7 +2000,7 @@ fun EmptyQueueStateCard(
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold
                     ),
-                    color = Color.White
+                    color = colorScheme.onSurface
                 )
 
                 Text(
@@ -2012,7 +2009,7 @@ fun EmptyQueueStateCard(
                     else
                         "Browse any web page in the Browser tab to sniff video and audio streams, or tap below to paste a direct download link.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFF88A0B2),
+                    color = colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 8.dp),
                     lineHeight = 20.sp
                 )
@@ -2021,8 +2018,8 @@ fun EmptyQueueStateCard(
             Surface(
                 onClick = onOpenNewDownload,
                 shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF00E5FF).copy(alpha = 0.15f),
-                border = BorderStroke(1.dp, Color(0xFF00E5FF))
+                color = colorScheme.primaryContainer,
+                border = BorderStroke(1.dp, colorScheme.primary.copy(alpha = 0.5f))
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -2032,14 +2029,14 @@ fun EmptyQueueStateCard(
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = null,
-                        tint = Color(0xFF00E5FF),
+                        tint = colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
                         text = "Add URL",
                         style = MaterialTheme.typography.labelLarge.copy(
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00E5FF)
+                            color = colorScheme.onPrimaryContainer
                         )
                     )
                 }
@@ -2056,6 +2053,8 @@ fun ModernAddDownloadDialog(
     onDismiss: () -> Unit,
     onEnqueue: (url: String, fileName: String, threadCount: Int) -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
+    val extendedColors = UdmTheme.extendedColors
     val clipboardManager = LocalClipboardManager.current
     var urlText by remember { mutableStateOf("") }
     var fileNameText by remember { mutableStateOf("") }
@@ -2084,13 +2083,13 @@ fun ModernAddDownloadDialog(
                     modifier = Modifier
                         .size(36.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF00E5FF).copy(alpha = 0.15f)),
+                        .background(colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.CloudDownload,
                         contentDescription = null,
-                        tint = Color(0xFF00E5FF),
+                        tint = colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -2099,7 +2098,7 @@ fun ModernAddDownloadDialog(
                     text = "New Download Task",
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color.White
+                        color = colorScheme.onSurface
                     )
                 )
             }
@@ -2111,8 +2110,8 @@ fun ModernAddDownloadDialog(
                     Surface(
                         onClick = { urlText = clipboardText },
                         shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF00E5FF).copy(alpha = 0.12f),
-                        border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f))
+                        color = colorScheme.primaryContainer,
+                        border = BorderStroke(1.dp, colorScheme.primary.copy(alpha = 0.4f))
                     ) {
                         Row(
                             modifier = Modifier
@@ -2121,10 +2120,10 @@ fun ModernAddDownloadDialog(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = colorScheme.onPrimaryContainer, modifier = Modifier.size(14.dp))
                             Text(
                                 text = "Paste: ${clipboardText.take(35)}...",
-                                style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E5FF)),
+                                style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = colorScheme.onPrimaryContainer),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -2142,16 +2141,16 @@ fun ModernAddDownloadDialog(
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF00E5FF),
-                        unfocusedBorderColor = Color(0xFF1D374A),
-                        focusedLabelColor = Color(0xFF00E5FF),
-                        unfocusedLabelColor = Color(0xFF8BA6B9),
-                        cursorColor = Color(0xFF00E5FF)
+                        focusedBorderColor = colorScheme.primary,
+                        unfocusedBorderColor = colorScheme.outline,
+                        focusedLabelColor = colorScheme.primary,
+                        unfocusedLabelColor = colorScheme.onSurfaceVariant,
+                        cursorColor = colorScheme.primary
                     ),
                     trailingIcon = {
                         if (urlText.isNotEmpty()) {
                             IconButton(onClick = { urlText = "" }) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF8BA6B9))
+                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -2167,14 +2166,14 @@ fun ModernAddDownloadDialog(
                             modifier = Modifier
                                 .size(6.dp)
                                 .clip(CircleShape)
-                                .background(if (isStreaming) Color(0xFF00E5FF) else Color(0xFF00E676))
+                                .background(if (isStreaming) colorScheme.primary else extendedColors.success)
                         )
                         Text(
                             text = if (isStreaming) "Detected: Video/Audio Media Stream Extractor" else "Detected: Direct HTTP/HTTPS Multi-Thread File",
                             style = TextStyle(
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (isStreaming) Color(0xFF00E5FF) else Color(0xFF00E676)
+                                color = if (isStreaming) colorScheme.primary else extendedColors.success
                             )
                         )
                     }
@@ -2190,11 +2189,11 @@ fun ModernAddDownloadDialog(
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF00E5FF),
-                        unfocusedBorderColor = Color(0xFF1D374A),
-                        focusedLabelColor = Color(0xFF00E5FF),
-                        unfocusedLabelColor = Color(0xFF8BA6B9),
-                        cursorColor = Color(0xFF00E5FF)
+                        focusedBorderColor = colorScheme.primary,
+                        unfocusedBorderColor = colorScheme.outline,
+                        focusedLabelColor = colorScheme.primary,
+                        unfocusedLabelColor = colorScheme.onSurfaceVariant,
+                        cursorColor = colorScheme.primary
                     )
                 )
 
@@ -2208,14 +2207,14 @@ fun ModernAddDownloadDialog(
                         Text(
                             text = "Parallel Concurrency",
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = Color(0xFF8BA6B9)
+                            color = colorScheme.onSurfaceVariant
                         )
                         Text(
                             text = "$threadSlider Sockets ${if (threadSlider >= 16) "(Turbo)" else ""}",
                             style = TextStyle(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00E5FF)
+                                color = colorScheme.primary
                             )
                         )
                     }
@@ -2226,9 +2225,9 @@ fun ModernAddDownloadDialog(
                         valueRange = 1f..16f,
                         steps = 14,
                         colors = SliderDefaults.colors(
-                            thumbColor = Color(0xFF00E5FF),
-                            activeTrackColor = Color(0xFF00E5FF),
-                            inactiveTrackColor = Color(0xFF132A39)
+                            thumbColor = colorScheme.primary,
+                            activeTrackColor = colorScheme.primary,
+                            inactiveTrackColor = colorScheme.surfaceContainerHighest
                         )
                     )
 
@@ -2238,11 +2237,12 @@ fun ModernAddDownloadDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         listOf(4 to "4x Eco", 8 to "8x Standard", 16 to "16x Turbo").forEach { (th, label) ->
+                            val isSelected = threadSlider == th
                             Surface(
                                 onClick = { threadSlider = th },
                                 shape = RoundedCornerShape(8.dp),
-                                color = if (threadSlider == th) Color(0xFF00E5FF).copy(alpha = 0.2f) else Color(0xFF0D1E2B),
-                                border = BorderStroke(1.dp, if (threadSlider == th) Color(0xFF00E5FF) else Color(0xFF1A384D)),
+                                color = if (isSelected) colorScheme.primaryContainer else colorScheme.surfaceContainer,
+                                border = BorderStroke(1.dp, if (isSelected) colorScheme.primary else colorScheme.outlineVariant),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Box(
@@ -2253,8 +2253,8 @@ fun ModernAddDownloadDialog(
                                         text = label,
                                         style = TextStyle(
                                             fontSize = 11.sp,
-                                            fontWeight = if (threadSlider == th) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (threadSlider == th) Color(0xFF00E5FF) else Color(0xFF8BA6B9)
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant
                                         )
                                     )
                                 }
@@ -2273,8 +2273,8 @@ fun ModernAddDownloadDialog(
                 },
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF00E5FF),
-                    contentColor = Color(0xFF002230)
+                    containerColor = colorScheme.primary,
+                    contentColor = colorScheme.onPrimary
                 ),
                 enabled = urlText.isNotBlank()
             ) {
@@ -2285,13 +2285,13 @@ fun ModernAddDownloadDialog(
             OutlinedButton(
                 onClick = onDismiss,
                 shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, Color(0xFF1E3C50))
+                border = BorderStroke(1.dp, colorScheme.outline)
             ) {
-                Text("Cancel", color = Color(0xFF8BA6B9))
+                Text("Cancel", color = colorScheme.onSurfaceVariant)
             }
         },
         shape = RoundedCornerShape(26.dp),
-        containerColor = Color(0xFF07131D)
+        containerColor = colorScheme.surfaceContainerHigh
     )
 }
 
@@ -2387,37 +2387,76 @@ private fun shareMedia(context: Context, task: DownloadTaskEntity) {
     })
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF060D13)
+@Preview(name = "Downloads - Light", showBackground = true)
 @Composable
-fun LuxuryDownloadsScreenPreview() {
-    UDMTheme {
-        DownloadsScreenContent(
-            tasks = listOf(
-                SamplePreviewTask,
-                SamplePreviewTask.copy(
-                    id = "sample_2",
-                    title = "Cyberpunk 2077 Night City High Bitrate FLAC Audio",
-                    mediaType = MediaType.AUDIO,
-                    qualityLabel = "320kbps",
-                    codecLabel = "FLAC",
-                    fileName = "NightCity_Soundtrack.flac",
-                    downloadedBytes = 120_000_000L,
-                    totalBytes = 240_000_000L,
-                    speedBytesPerSec = 7_200_000L,
-                    status = DownloadStatus.DOWNLOADING
-                )
-            ),
-            chunksMap = mapOf("sample_task" to SamplePreviewChunks),
-            peakSpeed = 24_500_000L,
-            onPauseTask = {},
-            onResumeTask = {},
-            onCancelTask = {},
-            onRetryTask = {},
-            onPauseAll = {},
-            onResumeAll = {},
-            onCancelAll = {},
-            onClearFailed = {},
-            onEnqueueManualDownload = { _, _, _ -> }
-        )
+fun LuxuryDownloadsScreenPreviewLight() {
+    UDMTheme(darkTheme = false, dynamicColor = false) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            DownloadsScreenContent(
+                tasks = listOf(
+                    SamplePreviewTask,
+                    SamplePreviewTask.copy(
+                        id = "sample_2",
+                        title = "Cyberpunk 2077 Night City High Bitrate FLAC Audio",
+                        mediaType = MediaType.AUDIO,
+                        qualityLabel = "320kbps",
+                        codecLabel = "FLAC",
+                        fileName = "NightCity_Soundtrack.flac",
+                        downloadedBytes = 120_000_000L,
+                        totalBytes = 240_000_000L,
+                        speedBytesPerSec = 7_200_000L,
+                        status = DownloadStatus.DOWNLOADING
+                    )
+                ),
+                chunksMap = mapOf("sample_task" to SamplePreviewChunks),
+                peakSpeed = 24_500_000L,
+                onPauseTask = {},
+                onResumeTask = {},
+                onCancelTask = {},
+                onRetryTask = {},
+                onPauseAll = {},
+                onResumeAll = {},
+                onCancelAll = {},
+                onClearFailed = {},
+                onEnqueueManualDownload = { _, _, _ -> }
+            )
+        }
+    }
+}
+
+@Preview(name = "Downloads - Dark", showBackground = true)
+@Composable
+fun LuxuryDownloadsScreenPreviewDark() {
+    UDMTheme(darkTheme = true, dynamicColor = false) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            DownloadsScreenContent(
+                tasks = listOf(
+                    SamplePreviewTask,
+                    SamplePreviewTask.copy(
+                        id = "sample_2",
+                        title = "Cyberpunk 2077 Night City High Bitrate FLAC Audio",
+                        mediaType = MediaType.AUDIO,
+                        qualityLabel = "320kbps",
+                        codecLabel = "FLAC",
+                        fileName = "NightCity_Soundtrack.flac",
+                        downloadedBytes = 120_000_000L,
+                        totalBytes = 240_000_000L,
+                        speedBytesPerSec = 7_200_000L,
+                        status = DownloadStatus.DOWNLOADING
+                    )
+                ),
+                chunksMap = mapOf("sample_task" to SamplePreviewChunks),
+                peakSpeed = 24_500_000L,
+                onPauseTask = {},
+                onResumeTask = {},
+                onCancelTask = {},
+                onRetryTask = {},
+                onPauseAll = {},
+                onResumeAll = {},
+                onCancelAll = {},
+                onClearFailed = {},
+                onEnqueueManualDownload = { _, _, _ -> }
+            )
+        }
     }
 }

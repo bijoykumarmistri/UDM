@@ -8,13 +8,17 @@ import com.universal.dm.data.local.DownloadChunkEntity
 import com.universal.dm.data.local.DownloadTaskEntity
 import com.universal.dm.data.model.DownloadStatus
 import com.universal.dm.data.model.MediaType
+import com.universal.dm.domain.downloader.DownloadEngineHelper
 import com.universal.dm.domain.downloader.DownloadManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class DownloadsViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -28,8 +32,10 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
     val activeTasks: StateFlow<List<DownloadTaskEntity>> = downloadDao.getActiveTasksFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private val _chunksMap = MutableStateFlow<Map<String, List<DownloadChunkEntity>>>(emptyMap())
-    val chunksMap: StateFlow<Map<String, List<DownloadChunkEntity>>> = _chunksMap.asStateFlow()
+    // Single reactive Room Flow eliminates N+1 per-task chunk queries on every progress tick
+    val chunksMap: StateFlow<Map<String, List<DownloadChunkEntity>>> = downloadDao.getActiveChunksFlow()
+        .map { chunks -> chunks.groupBy { it.taskId } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     private val _peakSpeed = MutableStateFlow(0L)
     val peakSpeed: StateFlow<Long> = _peakSpeed.asStateFlow()
@@ -40,28 +46,11 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
     init {
         viewModelScope.launch {
             allTasks.collect { tasks ->
-                val activeRunning = tasks.filter { it.status == DownloadStatus.DOWNLOADING }
-                val currentTotalSpeed = activeRunning.sumOf { it.speedBytesPerSec }
+                val currentTotalSpeed = tasks
+                    .filter { it.status == DownloadStatus.DOWNLOADING }
+                    .sumOf { it.speedBytesPerSec }
                 if (currentTotalSpeed > _peakSpeed.value) {
                     _peakSpeed.value = currentTotalSpeed
-                }
-
-                val relevantTasks = tasks.filter {
-                    it.status == DownloadStatus.DOWNLOADING || it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.PAUSED
-                }
-                if (relevantTasks.isNotEmpty() || _chunksMap.value.isNotEmpty()) {
-                    val newMap = mutableMapOf<String, List<DownloadChunkEntity>>()
-                    val previousMap = _chunksMap.value
-                    relevantTasks.forEach { task ->
-                        if (task.status == DownloadStatus.DOWNLOADING || !previousMap.containsKey(task.id)) {
-                            newMap[task.id] = downloadDao.getChunksForTask(task.id)
-                        } else {
-                            newMap[task.id] = previousMap[task.id] ?: emptyList()
-                        }
-                    }
-                    if (newMap != previousMap) {
-                        _chunksMap.value = newMap
-                    }
                 }
             }
         }
@@ -73,13 +62,12 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun deleteTask(task: DownloadTaskEntity, deleteFileFromStorage: Boolean = true) {
         viewModelScope.launch {
-            if (deleteFileFromStorage && !task.filePath.startsWith("content://")) {
-                val file = java.io.File(task.filePath)
-                if (file.exists()) {
-                    runCatching { file.delete() }
+            if (deleteFileFromStorage) {
+                withContext(Dispatchers.IO) {
+                    DownloadEngineHelper.deleteSavedFile(getApplication(), task.filePath)
                 }
             }
-            downloadDao.deleteTask(task)
+            downloadManager.cancelDownload(task.id)
         }
     }
 
@@ -146,15 +134,15 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
     fun enqueueManualDownload(url: String, fileName: String, threadCount: Int = 8) {
         viewModelScope.launch {
             val isStreamingUrl = url.contains("youtube.com", ignoreCase = true) ||
-                    url.contains("youtu.be", ignoreCase = true) ||
-                    url.contains("vimeo.com", ignoreCase = true) ||
-                    url.contains("soundcloud.com", ignoreCase = true) ||
-                    url.contains("dailymotion.com", ignoreCase = true) ||
-                    url.contains("facebook.com", ignoreCase = true) ||
-                    url.contains("instagram.com", ignoreCase = true) ||
-                    url.contains("tiktok.com", ignoreCase = true) ||
-                    url.contains("twitter.com", ignoreCase = true) ||
-                    url.contains("x.com", ignoreCase = true)
+                url.contains("youtu.be", ignoreCase = true) ||
+                url.contains("vimeo.com", ignoreCase = true) ||
+                url.contains("soundcloud.com", ignoreCase = true) ||
+                url.contains("dailymotion.com", ignoreCase = true) ||
+                url.contains("facebook.com", ignoreCase = true) ||
+                url.contains("instagram.com", ignoreCase = true) ||
+                url.contains("tiktok.com", ignoreCase = true) ||
+                url.contains("twitter.com", ignoreCase = true) ||
+                url.contains("x.com", ignoreCase = true)
 
             val mediaType = if (isStreamingUrl) MediaType.VIDEO else MediaType.DIRECT_FILE
             val defaultExtension = if (isStreamingUrl) "mp4" else "bin"

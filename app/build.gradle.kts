@@ -14,13 +14,18 @@ android {
         applicationId = "com.universal.dm"
         minSdk = 31
         targetSdk = 37
-        versionCode = 3
-        versionName = "3.0"
+        versionCode = 4
+        versionName = "3.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
 
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = false
         }
     }
 
@@ -33,12 +38,10 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = false
-            isShrinkResources = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            optimization {
+                enable = true
+            }
+            proguardFiles("proguard-rules.pro")
         }
     }
     compileOptions {

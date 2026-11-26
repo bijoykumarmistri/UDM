@@ -8,6 +8,7 @@ import com.universal.dm.UdmApplication
 import com.universal.dm.data.model.DownloadStatus
 import com.universal.dm.data.model.MediaType
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -46,28 +47,30 @@ class UdmDownloadWorker(
 
         downloadDao.updateTaskStatus(taskId, DownloadStatus.DOWNLOADING)
 
-        val tempDir = File(applicationContext.cacheDir, "downloads").apply { if (!exists()) mkdirs() }
-        val tempFile = File(tempDir, task.fileName)
+        val tempRootDir = File(applicationContext.cacheDir, "downloads").apply { if (!exists()) mkdirs() }
+        // Per-task isolated workspace prevents filename collisions and enables clean recursive cleanup
+        val taskTempDir = File(tempRootDir, "task_$taskId").apply { if (!exists()) mkdirs() }
+        val safeTempFileName = DownloadEngineHelper.sanitizeFileName(task.fileName, "download_$taskId.bin")
+        val tempFile = File(taskTempDir, safeTempFileName)
+
+        var shouldPreserveTempForResume = false
 
         try {
             val isYouTube = task.sourcePageUrl.contains("youtube.com", ignoreCase = true) ||
-                    task.sourcePageUrl.contains("youtu.be", ignoreCase = true) ||
-                    task.downloadUrl.contains("youtube.com", ignoreCase = true) ||
-                    task.downloadUrl.contains("youtu.be", ignoreCase = true)
+                task.sourcePageUrl.contains("youtu.be", ignoreCase = true) ||
+                task.downloadUrl.contains("youtube.com", ignoreCase = true) ||
+                task.downloadUrl.contains("youtu.be", ignoreCase = true)
 
             val isHlsOrDash = task.downloadUrl.contains(".m3u8", ignoreCase = true) ||
-                    task.downloadUrl.contains(".mpd", ignoreCase = true)
+                task.downloadUrl.contains(".mpd", ignoreCase = true)
 
             val hasSeparateAudio = !task.pairedAudioUrl.isNullOrBlank()
 
-            // Direct download candidates:
-            // 1. Explicit DIRECT_FILE or formatId == "direct"
-            // 2. Direct media file on a non-YouTube site where video and audio are not separated and it's not an HLS playlist
             val isDirectDownload = !isYouTube && !isHlsOrDash && (
                 task.mediaType == MediaType.DIRECT_FILE ||
-                task.formatId == "direct" ||
-                !hasSeparateAudio
-            )
+                    task.formatId == "direct" ||
+                    !hasSeparateAudio
+                )
 
             val streamTargetUrl = if (isYouTube) {
                 task.sourcePageUrl.ifEmpty { task.downloadUrl }
@@ -79,7 +82,6 @@ class UdmDownloadWorker(
 
             val completedFile: File = if (isDirectDownload) {
                 try {
-                    // ENGINE A: Direct HTTP Multi-Threaded Chunk Downloader (OkHttp)
                     httpChunkDownloader.downloadDirectHttp(
                         taskId = taskId,
                         url = task.downloadUrl,
@@ -106,7 +108,7 @@ class UdmDownloadWorker(
                     streamExtractorDownloader.downloadStream(
                         taskId = taskId,
                         url = streamTargetUrl,
-                        outputDirectory = tempDir,
+                        outputDirectory = tempRootDir,
                         mediaType = task.mediaType,
                         qualityLabel = task.qualityLabel,
                         codecLabel = task.codecLabel,
@@ -130,11 +132,10 @@ class UdmDownloadWorker(
                 }
             } else {
                 try {
-                    // ENGINE B: YoutubeDL + FFmpeg Stream Extraction & Merging
                     streamExtractorDownloader.downloadStream(
                         taskId = taskId,
                         url = streamTargetUrl,
-                        outputDirectory = tempDir,
+                        outputDirectory = tempRootDir,
                         mediaType = task.mediaType,
                         qualityLabel = task.qualityLabel,
                         codecLabel = task.codecLabel,
@@ -185,7 +186,9 @@ class UdmDownloadWorker(
                 }
             }
 
-            // Determine exact MIME type & extension from the actual finished file
+            // Capture exact byte length BEFORE saveFileToPublicDownloads moves & deletes sourceFile!
+            val actualCompletedBytes = completedFile.length()
+
             val fileExt = (completedFile.extension.ifEmpty { task.fileName.substringAfterLast('.', "") }).lowercase()
             val resolvedMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(fileExt)
             val mimeType = when (task.mediaType) {
@@ -214,7 +217,6 @@ class UdmDownloadWorker(
                 }
             }
 
-            // Ensure task.fileName has the correct extension matching the actual completed file
             val finalFileName = if (fileExt.isNotEmpty() && !task.fileName.endsWith(".$fileExt", ignoreCase = true)) {
                 "${task.fileName.substringBeforeLast('.')}.$fileExt"
             } else {
@@ -228,17 +230,20 @@ class UdmDownloadWorker(
                 mimeType = mimeType
             )
 
-            // Update database task state to COMPLETED
-            val finalBytes = if (completedFile.exists()) completedFile.length() else task.totalBytes
-            val updatedTask = task.copy(
+            // Fetch latest task row so progress fields stay accurate, then mark COMPLETED
+            val latestTask = downloadDao.getTaskById(taskId) ?: task
+            val resolvedTotalBytes = if (actualCompletedBytes > 0L) actualCompletedBytes else latestTask.totalBytes
+            val updatedTask = latestTask.copy(
                 status = DownloadStatus.COMPLETED,
                 filePath = finalPublicPath,
                 fileName = finalFileName,
-                downloadedBytes = if (finalBytes > 0) finalBytes else task.downloadedBytes,
-                totalBytes = if (finalBytes > 0) finalBytes else task.totalBytes,
-                speedBytesPerSec = 0L
+                downloadedBytes = resolvedTotalBytes,
+                totalBytes = resolvedTotalBytes,
+                speedBytesPerSec = 0L,
+                errorMessage = null
             )
             downloadDao.updateTask(updatedTask)
+            downloadDao.deleteChunksForTask(taskId)
 
             val prefs = applicationContext.getSharedPreferences("udm_app_settings", Context.MODE_PRIVATE)
             val soundEnabled = prefs.getBoolean("key_sound_completion", true)
@@ -251,13 +256,23 @@ class UdmDownloadWorker(
 
             Result.success()
         } catch (e: Exception) {
-            Log.e(TAG, "Download failed for task $taskId", e)
-            if (isStopped) {
-                downloadDao.updateTaskStatus(taskId, DownloadStatus.PAUSED, "Paused by user")
-            } else {
-                downloadDao.updateTaskStatus(taskId, DownloadStatus.FAILED, e.message ?: "Unknown error")
+            Log.e(TAG, "Download failed for task $taskId (isStopped=$isStopped)", e)
+            withContext(NonCancellable) {
+                if (isStopped) {
+                    // Preserve temp chunks so multi-part HTTP resume continues seamlessly
+                    shouldPreserveTempForResume = true
+                    downloadDao.updateTaskStatus(taskId, DownloadStatus.PAUSED, "Paused by user")
+                } else {
+                    downloadDao.updateTaskStatus(taskId, DownloadStatus.FAILED, e.message ?: "Unknown error")
+                }
             }
             Result.failure()
+        } finally {
+            if (!shouldPreserveTempForResume) {
+                runCatching {
+                    if (taskTempDir.exists()) taskTempDir.deleteRecursively()
+                }
+            }
         }
     }
 

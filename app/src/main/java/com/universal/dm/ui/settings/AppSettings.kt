@@ -7,8 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import com.universal.dm.UdmApplication
 import kotlinx.coroutines.launch
 
 /**
@@ -70,7 +69,7 @@ class AppSettingsState(private val context: Context? = null) {
         prefs?.edit()?.putBoolean(KEY_WIFI_ONLY, enabled)?.apply()
         val appContext = context?.applicationContext
         if (appContext != null) {
-            CoroutineScope(Dispatchers.IO).launch {
+            UdmApplication.appScope.launch {
                 runCatching {
                     com.universal.dm.domain.downloader.DownloadManager.getInstance(appContext).updateNetworkConstraints()
                 }

@@ -57,7 +57,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.universal.dm.ui.theme.CodecAv1Badge
 import com.universal.dm.ui.theme.UDMTheme
 
 /**
@@ -270,7 +269,7 @@ fun TabSwitcherSheet(
                                             imageVector = if (tab.isIncognito) Icons.Default.VpnLock else if (tab.url != null) Icons.Default.Lock else Icons.Default.Language,
                                             contentDescription = null,
                                             modifier = Modifier.size(14.dp),
-                                            tint = if (tab.isIncognito) CodecAv1Badge else MaterialTheme.colorScheme.primary
+                                            tint = if (tab.isIncognito) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
                                         )
                                         Text(
                                             text = tab.title,

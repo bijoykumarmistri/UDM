@@ -41,7 +41,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -51,15 +50,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.universal.dm.ui.theme.UDMTheme
 
 /**
- * Premium Apple-grade Floating Capsule Navigation Bar for UDM V2.
+ * Floating Capsule Navigation Bar for UDM.
  *
- * Implements GPU-accelerated, high-refresh-rate 120Hz smooth page switching:
- * - Static screen positions: Each option has a fixed 1/3 slot width with zero horizontal jumping.
- * - Full touch targets: 100% of the dock surface is clickable with zero dead zones.
- * - Hardware-accelerated sliding indicator: Rendered via graphicsLayer translationX on GPU.
- * - Micro-interaction feedback: Low-latency spring response, tactile press bounce, and haptics.
+ * Adapts automatically to Light & Dark Mode and Material You dynamic colors.
  */
 @Composable
 fun UdmBottomNav(
@@ -70,37 +66,33 @@ fun UdmBottomNav(
 ) {
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
-    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 
-    // Dock styling colors matching reference design, adapting to light and dark themes
+    val colorScheme = MaterialTheme.colorScheme
     val dockBackground = Brush.verticalGradient(
-        colors = if (isDark) {
-            listOf(Color(0xF809141D), Color(0xF8050C13))
-        } else {
-            listOf(Color(0xF2FFFFFF), Color(0xF2F0F5F8))
-        }
+        colors = listOf(
+            colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
+            colorScheme.surfaceContainer.copy(alpha = 0.96f)
+        )
     )
-    val dockBorderColor = if (isDark) Color(0xFF142B39) else Color(0xFFD4E2EB)
-    val activeBorderColor = if (isDark) Color(0xFF00C4D6) else MaterialTheme.colorScheme.primary
-    val activeFillColor = if (isDark) Color(0x6600E5FF).copy(alpha = 0.16f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-    val activeIconColor = if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary
-    val inactiveIconColor = if (isDark) Color(0xFF758E9E) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
-    val activeTextColor = if (isDark) Color(0xFFFFFFFF) else MaterialTheme.colorScheme.primary
-    val shadowSpotColor = if (isDark) Color(0x99000000) else Color(0x22000000)
-    val shadowAmbientColor = if (isDark) Color(0x3300C4D6) else Color(0x10006874)
+    val dockBorderColor = colorScheme.outlineVariant
+    val activeBorderColor = colorScheme.primary.copy(alpha = 0.55f)
+    val activeFillColor = colorScheme.primaryContainer.copy(alpha = 0.72f)
+    val activeIconColor = colorScheme.onPrimaryContainer
+    val inactiveIconColor = colorScheme.onSurfaceVariant
+    val activeTextColor = colorScheme.onPrimaryContainer
+    val shadowSpotColor = colorScheme.scrim.copy(alpha = 0.25f)
+    val shadowAmbientColor = colorScheme.primary.copy(alpha = 0.12f)
 
     var dockWidthPx by remember { mutableIntStateOf(0) }
     val screens = Screen.entries
     val screenCount = screens.size
     val selectedIndex = screens.indexOf(currentScreen).coerceAtLeast(0)
 
-    // Calculate slot width in pixels and Dp
     val slotWidthPx = if (dockWidthPx > 0) dockWidthPx.toFloat() / screenCount else 0f
     val slotWidthDp = with(density) {
         if (slotWidthPx > 0) slotWidthPx.toDp() else 0.dp
     }
 
-    // High-precision GPU translation spring (buttery smooth 120Hz motion)
     val targetOffsetPx = slotWidthPx * selectedIndex
     val animatedOffsetPxState = animateFloatAsState(
         targetValue = targetOffsetPx,
@@ -118,13 +110,12 @@ fun UdmBottomNav(
             .padding(horizontal = 16.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
-        // Outer Floating Capsule Container
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .widthIn(max = 440.dp)
                 .shadow(
-                    elevation = 20.dp,
+                    elevation = 16.dp,
                     shape = CircleShape,
                     spotColor = shadowSpotColor,
                     ambientColor = shadowAmbientColor
@@ -143,7 +134,6 @@ fun UdmBottomNav(
                     }
                 }
         ) {
-            // 1. Creative Sliding Glowing Active Indicator Pill (Rendered on GPU layer without layout passes)
             if (slotWidthPx > 0) {
                 Box(
                     modifier = Modifier
@@ -163,7 +153,6 @@ fun UdmBottomNav(
                 )
             }
 
-            // 2. Static Equal Slots Row - 100% full-width touch area for every option
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -209,7 +198,6 @@ private fun StaticBottomNavItem(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    // Tactile press micro-interaction with quick feedback
     val pressScaleState = animateFloatAsState(
         targetValue = if (isPressed) 0.92f else 1.0f,
         animationSpec = if (isPressed) {
@@ -220,7 +208,6 @@ private fun StaticBottomNavItem(
         label = "PressScale"
     )
 
-    // Snappy icon scale synchronized with active state
     val iconScaleState = animateFloatAsState(
         targetValue = if (isSelected) 1.08f else 0.95f,
         animationSpec = spring(dampingRatio = 0.75f, stiffness = 420f),
@@ -239,7 +226,6 @@ private fun StaticBottomNavItem(
         label = "TextColor"
     )
 
-    // Entire slot is clickable - zero dead space, permanently fixed touch position
     Box(
         modifier = modifier
             .clip(CircleShape)
@@ -264,8 +250,8 @@ private fun StaticBottomNavItem(
                 BadgedBox(
                     badge = {
                         Badge(
-                            containerColor = Color(0xFF00E5FF),
-                            contentColor = Color(0xFF001F24)
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
                         ) {
                             Text(
                                 text = badgeCount.toString(),
@@ -319,38 +305,30 @@ private fun StaticBottomNavItem(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0E1415)
+@Preview(name = "Bottom Nav - Dark", showBackground = true)
 @Composable
-fun UdmBottomNavBrowserPreview() {
-    Box(modifier = Modifier.padding(16.dp)) {
-        UdmBottomNav(
-            currentScreen = Screen.Browser,
-            onScreenSelected = {},
-            badgeCount = 3
-        )
+fun UdmBottomNavDarkPreview() {
+    UDMTheme(darkTheme = true, dynamicColor = false) {
+        Box(modifier = Modifier.background(MaterialTheme.colorScheme.background).padding(16.dp)) {
+            UdmBottomNav(
+                currentScreen = Screen.Downloads,
+                onScreenSelected = {},
+                badgeCount = 3
+            )
+        }
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF0E1415)
+@Preview(name = "Bottom Nav - Light", showBackground = true)
 @Composable
-fun UdmBottomNavDownloadPreview() {
-    Box(modifier = Modifier.padding(16.dp)) {
-        UdmBottomNav(
-            currentScreen = Screen.Downloads,
-            onScreenSelected = {},
-            badgeCount = 2
-        )
-    }
-}
-
-@Preview(showBackground = true, backgroundColor = 0xFF0E1415)
-@Composable
-fun UdmBottomNavSettingsPreview() {
-    Box(modifier = Modifier.padding(16.dp)) {
-        UdmBottomNav(
-            currentScreen = Screen.Settings,
-            onScreenSelected = {},
-            badgeCount = 0
-        )
+fun UdmBottomNavLightPreview() {
+    UDMTheme(darkTheme = false, dynamicColor = false) {
+        Box(modifier = Modifier.background(MaterialTheme.colorScheme.background).padding(16.dp)) {
+            UdmBottomNav(
+                currentScreen = Screen.Downloads,
+                onScreenSelected = {},
+                badgeCount = 3
+            )
+        }
     }
 }

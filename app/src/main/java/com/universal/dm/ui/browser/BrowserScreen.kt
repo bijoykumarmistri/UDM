@@ -155,9 +155,8 @@ import com.universal.dm.domain.adblock.AdBlockerEngine
 import com.universal.dm.domain.downloader.DownloadManager
 import com.universal.dm.domain.sniffer.MediaSniffer
 import com.universal.dm.ui.settings.LocalAppSettings
-import com.universal.dm.ui.theme.CodecAv1Badge
-import com.universal.dm.ui.theme.CodecM4aBadge
 import com.universal.dm.ui.theme.UDMTheme
+import com.universal.dm.ui.theme.UdmTheme
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -425,6 +424,7 @@ private fun BrowserScreenContent(
             } else {
                 // Programmatic URL tracking to prevent in-page navigations (YouTube clicks) from rolling back
                 var lastLoadedProgrammaticUrl by remember { mutableStateOf<String?>(null) }
+                val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -457,8 +457,6 @@ private fun BrowserScreenContent(
                                 clearCache(true)
                             }
 
-                            val mainHandler = Handler(Looper.getMainLooper())
-
                             // Add Javascript Interface for HTML5 video/audio DOM sniffing & SPA navigation
                             addJavascriptInterface(object {
                                 @JavascriptInterface
@@ -468,7 +466,7 @@ private fun BrowserScreenContent(
                                     val isChunkOrBlob = mediaUrl.startsWith("blob:") || mediaUrl.contains("videoplayback")
                                     if (currentMedia == null && !isChunkOrBlob) {
                                         mainHandler.post {
-                                            viewModel.triggerMediaExtraction(mediaUrl, title, autoShowBottomSheet = false)
+                                            viewModel.triggerMediaExtraction(mediaUrl, viewModel.uiState.value.pageTitle, autoShowBottomSheet = false)
                                         }
                                     }
                                 }
@@ -525,7 +523,8 @@ private fun BrowserScreenContent(
                                     val isAdBlocked = appSettings.isAdBlockerEnabled && viewModel.adBlockerEngine.shouldBlockRequest(reqUrl)
 
                                     if (isHostBlocked || isAdBlocked) {
-                                        mainHandler.post { viewModel.onAdBlocked() }
+                                        // StateFlow.update is lock-free and thread-safe; avoids allocating Runnables on mainHandler
+                                        viewModel.onAdBlocked()
                                         return viewModel.adBlockerEngine.createEmptyResourceResponse()
                                     }
 
@@ -598,18 +597,29 @@ private fun BrowserScreenContent(
                                         return false
                                     }
                                     if (isUserGesture && resultMsg != null) {
+                                        val parentWebView = view ?: return false
                                         val transport = resultMsg.obj as? WebView.WebViewTransport
-                                        val tempWebView = WebView(view?.context ?: return false).apply {
-                                            webViewClient = object : WebViewClient() {
-                                                override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
-                                                    request?.url?.toString()?.let { targetUrl ->
-                                                        lastLoadedProgrammaticUrl = targetUrl
-                                                        view.loadUrl(targetUrl)
-                                                    }
-                                                    return true
-                                                }
+                                        val tempWebView = WebView(parentWebView.context)
+                                        var destroyed = false
+                                        val destroyTemp = {
+                                            if (!destroyed) {
+                                                destroyed = true
+                                                tempWebView.stopLoading()
+                                                tempWebView.destroy()
                                             }
                                         }
+                                        tempWebView.webViewClient = object : WebViewClient() {
+                                            override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
+                                                request?.url?.toString()?.let { targetUrl ->
+                                                    lastLoadedProgrammaticUrl = targetUrl
+                                                    parentWebView.loadUrl(targetUrl)
+                                                }
+                                                mainHandler.post(destroyTemp)
+                                                return true
+                                            }
+                                        }
+                                        // Safety cleanup in case target never triggers shouldOverrideUrlLoading
+                                        mainHandler.postDelayed(destroyTemp, 5000L)
                                         transport?.webView = tempWebView
                                         resultMsg.sendToTarget()
                                         return true
@@ -635,6 +645,20 @@ private fun BrowserScreenContent(
                         if (uiState.currentLoadedUrl != null && uiState.currentLoadedUrl != lastLoadedProgrammaticUrl) {
                             lastLoadedProgrammaticUrl = uiState.currentLoadedUrl
                             webView.loadUrl(uiState.currentLoadedUrl!!)
+                        }
+                    },
+                    onRelease = { webView ->
+                        // Release native Chromium buffers, audio/video decoders, and JS bridge immediately
+                        mainHandler.removeCallbacksAndMessages(null)
+                        webView.stopLoading()
+                        webView.loadUrl("about:blank")
+                        webView.onPause()
+                        webView.removeJavascriptInterface("UdmMediaBridge")
+                        webView.clearHistory()
+                        webView.removeAllViews()
+                        webView.destroy()
+                        if (webViewInstance === webView) {
+                            webViewInstance = null
                         }
                     }
                 )
@@ -669,14 +693,16 @@ private fun BrowserScreenContent(
                     animationSpec = tween(180, easing = FastOutLinearInEasing)
                 )
             ) {
+                val colorScheme = MaterialTheme.colorScheme
+                val extendedColors = UdmTheme.extendedColors
                 if (isExtracting) {
                     // Extracting Progress Pill
                     Box(
                         modifier = Modifier
-                            .shadow(16.dp, CircleShape, spotColor = Color(0x99000000))
+                            .shadow(12.dp, CircleShape, spotColor = colorScheme.scrim.copy(alpha = 0.25f))
                             .clip(CircleShape)
-                            .background(Color(0xF5081520))
-                            .border(1.dp, Color(0xFF00B4D8).copy(alpha = 0.5f), CircleShape)
+                            .background(colorScheme.surfaceContainerHigh)
+                            .border(1.dp, colorScheme.primary.copy(alpha = 0.5f), CircleShape)
                             .padding(horizontal = 20.dp, vertical = 10.dp)
                     ) {
                         Row(
@@ -686,19 +712,19 @@ private fun BrowserScreenContent(
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
                                 strokeWidth = 2.dp,
-                                color = Color(0xFF00E5FF)
+                                color = colorScheme.primary
                             )
                             Text(
                                 text = "Sniffing Media Streams...",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color.White
+                                color = colorScheme.onSurface
                             )
                             Box(
                                 modifier = Modifier
                                     .size(20.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0x33FF5252))
+                                    .background(colorScheme.errorContainer)
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         viewModel.cancelSniffing()
@@ -708,7 +734,7 @@ private fun BrowserScreenContent(
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Cancel Sniffing",
-                                    tint = Color(0xFFFF5252),
+                                    tint = colorScheme.onErrorContainer,
                                     modifier = Modifier.size(13.dp)
                                 )
                             }
@@ -718,7 +744,8 @@ private fun BrowserScreenContent(
                     // Media Detected Dynamic Island
                     val isDirectFile = media.isDirectFile || (media.videoVariants.isEmpty() && media.audioVariants.isEmpty())
                     val totalVariants = if (isDirectFile) 1 else (media.videoVariants.size + media.audioVariants.size)
-                    val islandAccentColor = if (isDirectFile) Color(0xFF00E676) else Color(0xFF00E5FF)
+                    val islandAccentColor = if (isDirectFile) extendedColors.success else colorScheme.primary
+                    val islandOnAccentColor = if (isDirectFile) extendedColors.onSuccess else colorScheme.onPrimary
                     val interactionSource = remember { MutableInteractionSource() }
                     val isPressed by interactionSource.collectIsPressedAsState()
                     val islandScale by animateFloatAsState(
@@ -733,16 +760,9 @@ private fun BrowserScreenContent(
                                 scaleX = islandScale
                                 scaleY = islandScale
                             }
-                            .shadow(24.dp, CircleShape, spotColor = Color(0xAA000000), ambientColor = islandAccentColor.copy(alpha = 0.25f))
+                            .shadow(16.dp, CircleShape, spotColor = colorScheme.scrim.copy(alpha = 0.28f), ambientColor = islandAccentColor.copy(alpha = 0.25f))
                             .clip(CircleShape)
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(
-                                        Color(0xF508202C),
-                                        Color(0xF505151F)
-                                    )
-                                )
-                            )
+                            .background(colorScheme.surfaceContainerHigh)
                             .border(1.5.dp, islandAccentColor, CircleShape)
                             .clickable(
                                 interactionSource = interactionSource,
@@ -767,7 +787,7 @@ private fun BrowserScreenContent(
                                 Icon(
                                     imageVector = Icons.Default.Download,
                                     contentDescription = if (isDirectFile) "Download File" else "Download Streams",
-                                    tint = Color(0xFF001F24),
+                                    tint = islandOnAccentColor,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -778,13 +798,13 @@ private fun BrowserScreenContent(
                                         text = if (isDirectFile) (media.directFileVariant?.qualityLabel ?: "Direct File Ready") else "$totalVariants Streams Available",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 13.5.sp,
-                                        color = Color.White
+                                        color = colorScheme.onSurface
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(4.dp))
-                                            .background(islandAccentColor.copy(alpha = 0.2f))
+                                            .background(islandAccentColor.copy(alpha = 0.16f))
                                             .padding(horizontal = 5.dp, vertical = 1.dp)
                                     ) {
                                         Text(
@@ -798,7 +818,7 @@ private fun BrowserScreenContent(
                                 Text(
                                     text = if (isDirectFile) "Tap to configure download & start" else "Tap to configure formats & download",
                                     fontSize = 11.sp,
-                                    color = Color(0xFF90A4AE)
+                                    color = colorScheme.onSurfaceVariant
                                 )
                             }
 
@@ -813,7 +833,7 @@ private fun BrowserScreenContent(
                                 modifier = Modifier
                                     .size(24.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0x33000000))
+                                    .background(colorScheme.surfaceContainerHighest)
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         viewModel.dismissDetectedMedia()
@@ -823,7 +843,7 @@ private fun BrowserScreenContent(
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Dismiss",
-                                    tint = Color(0xFF90A4AE),
+                                    tint = colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(14.dp)
                                 )
                             }
@@ -923,7 +943,7 @@ private fun BrowserScreenContent(
 }
 
 /**
- * Apple-grade Glassmorphic Omnibar Composable.
+ * Material 3 Omnibar Composable.
  */
 @Composable
 fun AppleOmnibar(
@@ -948,12 +968,13 @@ fun AppleOmnibar(
     onReload: () -> Unit,
     onManualSniff: () -> Unit = {}
 ) {
-    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val colorScheme = MaterialTheme.colorScheme
+    val extendedColors = UdmTheme.extendedColors
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (isDark) Color(0xFF071118) else MaterialTheme.colorScheme.surface)
+            .background(colorScheme.surface)
             .statusBarsPadding()
     ) {
         // Incognito Banner
@@ -965,7 +986,7 @@ fun AppleOmnibar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0x338B5CF6))
+                    .background(colorScheme.tertiaryContainer)
                     .padding(horizontal = 16.dp, vertical = 5.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -977,20 +998,20 @@ fun AppleOmnibar(
                     Icon(
                         imageVector = Icons.Default.VpnLock,
                         contentDescription = null,
-                        tint = Color(0xFFCFBCFF),
+                        tint = colorScheme.onTertiaryContainer,
                         modifier = Modifier.size(14.dp)
                     )
                     Text(
                         text = "Incognito Tab • History & cookies isolated",
                         fontSize = 11.5.sp,
-                        color = Color(0xFFCFBCFF),
+                        color = colorScheme.onTertiaryContainer,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
                 Text(
                     text = "Leave",
                     fontSize = 11.5.sp,
-                    color = Color(0xFF00E5FF),
+                    color = colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.clickable { onToggleIncognito() }
                 )
@@ -1010,22 +1031,24 @@ fun AppleOmnibar(
                 enter = fadeIn(tween(180, easing = omnibarEasing)) + expandHorizontally(tween(180, easing = omnibarEasing)),
                 exit = fadeOut(tween(120, easing = FastOutLinearInEasing)) + shrinkHorizontally(tween(180, easing = omnibarEasing))
             ) {
-                // Back Button (with Long Press for Home)
                 AnimatedIconButton(
                     onClick = onBack,
                     onLongClick = onHome,
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back (Hold for Home)",
-                    tint = if (uiState.isIncognito) Color(0xFFCFBCFF) else (if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary)
+                    tint = if (uiState.isIncognito) colorScheme.tertiary else colorScheme.primary
                 )
             }
 
-            // Dedicated Home Button
             AnimatedIconButton(
                 onClick = onHome,
                 icon = Icons.Default.Home,
                 contentDescription = "Home",
-                tint = if (uiState.currentLoadedUrl != null) MaterialTheme.colorScheme.onSurfaceVariant else (if (uiState.isIncognito) Color(0xFFCFBCFF) else (if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary))
+                tint = if (uiState.currentLoadedUrl != null) {
+                    colorScheme.onSurfaceVariant
+                } else {
+                    if (uiState.isIncognito) colorScheme.tertiary else colorScheme.primary
+                }
             )
 
             var isEditingUrl by remember(uiState.currentLoadedUrl) { mutableStateOf(false) }
@@ -1042,14 +1065,13 @@ fun AppleOmnibar(
                 }
             }
 
-            // Capsule Omnibar Field
-            val omnibarBg = if (isDark) Color(0xFF0D1B26) else MaterialTheme.colorScheme.surfaceContainerHigh
+            val omnibarBg = colorScheme.surfaceContainerHigh
             val omnibarBorder = if (uiState.isIncognito) {
-                Color(0xFF8B5CF6).copy(alpha = 0.5f)
+                colorScheme.tertiary.copy(alpha = 0.6f)
             } else {
-                if (isDark) Color(0xFF142B39) else MaterialTheme.colorScheme.outlineVariant
+                colorScheme.outlineVariant
             }
-            val engineBtnBg = if (isDark) Color(0xFF07121A) else MaterialTheme.colorScheme.surfaceContainerHighest
+            val engineBtnBg = colorScheme.surfaceContainerHighest
 
             Box(
                 modifier = Modifier
@@ -1069,7 +1091,6 @@ fun AppleOmnibar(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Search Engine icon button with tap animation
                     Box(
                         modifier = Modifier
                             .size(28.dp)
@@ -1081,7 +1102,7 @@ fun AppleOmnibar(
                         Icon(
                             imageVector = if (uiState.currentLoadedUrl != null) Icons.Default.Lock else Icons.Default.Search,
                             contentDescription = "Search Engine: ${uiState.selectedSearchEngine.displayName}",
-                            tint = if (uiState.isIncognito) Color(0xFFCFBCFF) else (if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary),
+                            tint = if (uiState.isIncognito) colorScheme.tertiary else colorScheme.primary,
                             modifier = Modifier.size(15.dp)
                         )
                     }
@@ -1090,7 +1111,6 @@ fun AppleOmnibar(
 
                     Box(modifier = Modifier.weight(1f)) {
                         if (uiState.currentLoadedUrl != null && !isEditingUrl) {
-                            // Clean Safari/Arc style domain view
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center,
@@ -1101,7 +1121,7 @@ fun AppleOmnibar(
                                 Text(
                                     text = displayHost ?: "",
                                     style = TextStyle(
-                                        color = MaterialTheme.colorScheme.onSurface,
+                                        color = colorScheme.onSurface,
                                         fontSize = 13.5.sp,
                                         fontWeight = FontWeight.SemiBold
                                     ),
@@ -1113,7 +1133,7 @@ fun AppleOmnibar(
                             if (uiState.urlInput.isEmpty()) {
                                 Text(
                                     text = uiState.selectedSearchEngine.hint,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    color = colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                                     fontSize = 13.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -1125,11 +1145,11 @@ fun AppleOmnibar(
                                 onValueChange = onUrlChanged,
                                 singleLine = true,
                                 textStyle = TextStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
+                                    color = colorScheme.onSurface,
                                     fontSize = 13.5.sp,
                                     fontWeight = FontWeight.Normal
                                 ),
-                                cursorBrush = SolidColor(if (isDark) Color(0xFF00E5FF) else MaterialTheme.colorScheme.primary),
+                                cursorBrush = SolidColor(colorScheme.primary),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                                 keyboardActions = KeyboardActions(onGo = {
                                     isEditingUrl = false
@@ -1140,7 +1160,6 @@ fun AppleOmnibar(
                         }
                     }
 
-                    // Clear button animated
                     AnimatedVisibility(
                         visible = (uiState.currentLoadedUrl == null || isEditingUrl) && uiState.urlInput.isNotEmpty(),
                         enter = fadeIn() + scaleIn(),
@@ -1153,7 +1172,7 @@ fun AppleOmnibar(
                             Icon(
                                 imageVector = Icons.Default.Clear,
                                 contentDescription = "Clear",
-                                tint = Color(0xFF90A4AE),
+                                tint = colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(14.dp)
                             )
                         }
@@ -1169,7 +1188,8 @@ fun AppleOmnibar(
                 val hasStreams = totalStreamCount > 0
                 val streamCount = totalStreamCount
                 val isExtracting = uiState.isExtractingMedia
-                val pillColor = if (isDirect) Color(0xFF00E676) else Color(0xFF00E5FF)
+                val pillColor = if (isDirect) extendedColors.success else colorScheme.primary
+                val pillOnColor = if (isDirect) extendedColors.onSuccess else colorScheme.onPrimary
 
                 Box(
                     modifier = Modifier
@@ -1178,13 +1198,13 @@ fun AppleOmnibar(
                         .background(
                             when {
                                 hasStreams -> pillColor
-                                isExtracting -> Color(0xFF004D59)
-                                else -> Color(0xFF0D1B26)
+                                isExtracting -> colorScheme.primaryContainer
+                                else -> colorScheme.surfaceContainerHigh
                             }
                         )
                         .border(
                             width = 1.dp,
-                            color = if (hasStreams) pillColor else Color(0xFF142B39),
+                            color = if (hasStreams) pillColor else colorScheme.outlineVariant,
                             shape = CircleShape
                         )
                         .clickable { onManualSniff() }
@@ -1199,13 +1219,13 @@ fun AppleOmnibar(
                             CircularProgressIndicator(
                                 modifier = Modifier.size(13.dp),
                                 strokeWidth = 1.8.dp,
-                                color = Color(0xFF00E5FF)
+                                color = colorScheme.onPrimaryContainer
                             )
                         } else {
                             Icon(
                                 imageVector = Icons.Default.Download,
                                 contentDescription = if (hasStreams) "Streams Ready" else "Sniff Media Streams",
-                                tint = if (hasStreams) Color(0xFF001F24) else Color(0xFF00E5FF),
+                                tint = if (hasStreams) pillOnColor else colorScheme.primary,
                                 modifier = Modifier.size(15.dp)
                             )
                         }
@@ -1214,7 +1234,7 @@ fun AppleOmnibar(
                                 text = "$streamCount",
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF001F24)
+                                color = pillOnColor
                             )
                         }
                     }
@@ -1234,19 +1254,17 @@ fun AppleOmnibar(
                     onClick = onToggleMenu,
                     icon = Icons.Default.MoreVert,
                     contentDescription = "More Options",
-                    tint = Color(0xFF90A4AE)
+                    tint = colorScheme.onSurfaceVariant
                 )
 
                 DropdownMenu(
                     expanded = uiState.isMenuExpanded,
                     onDismissRequest = onDismissMenu,
-                    modifier = Modifier
-                        .background(Color(0xFF0B1721))
-                        .border(1.dp, Color(0xFF142B39), RoundedCornerShape(16.dp))
+                    containerColor = colorScheme.surfaceContainerHigh
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Start Page", color = Color.White) },
-                        leadingIcon = { Icon(Icons.Default.Home, contentDescription = null, tint = Color(0xFF00E5FF)) },
+                        text = { Text("Start Page", color = colorScheme.onSurface) },
+                        leadingIcon = { Icon(Icons.Default.Home, contentDescription = null, tint = colorScheme.primary) },
                         onClick = {
                             onHome()
                             onDismissMenu()
@@ -1261,14 +1279,14 @@ fun AppleOmnibar(
                                         uiState.detectedMediaState != null -> "Detected Streams (${uiState.detectedMediaState.videoVariants.size})"
                                         else -> "Sniff Media on Page"
                                     },
-                                    color = Color.White
+                                    color = colorScheme.onSurface
                                 )
                             },
                             leadingIcon = {
                                 Icon(
                                     Icons.Default.Download,
                                     contentDescription = null,
-                                    tint = Color(0xFF00E5FF)
+                                    tint = colorScheme.primary
                                 )
                             },
                             onClick = {
@@ -1277,17 +1295,16 @@ fun AppleOmnibar(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Pin to Favourite", color = Color.White) },
-                            leadingIcon = { Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFF00E5FF)) },
+                            text = { Text("Pin to Favourite", color = colorScheme.onSurface) },
+                            leadingIcon = { Icon(Icons.Default.Star, contentDescription = null, tint = colorScheme.primary) },
                             onClick = {
                                 onPinCurrentPage()
                                 onDismissMenu()
                             }
                         )
                     }
-                    HorizontalDivider(color = Color(0xFF142B39))
+                    HorizontalDivider(color = colorScheme.outlineVariant)
 
-                    // Brave Shields (Ad-Blocker) Toggle Item
                     DropdownMenuItem(
                         text = {
                             Row(
@@ -1296,21 +1313,17 @@ fun AppleOmnibar(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f, fill = false)) {
-                                    Text("Brave Shields", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                    Text("Brave Shields", color = colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                                     Text(
                                         text = if (appSettingsAdBlocker) "${uiState.blockedAdsCount} blocked" else "Shields Off",
                                         fontSize = 11.sp,
-                                        color = if (appSettingsAdBlocker) Color(0xFF00E5FF) else Color(0xFF78909C)
+                                        color = if (appSettingsAdBlocker) colorScheme.primary else colorScheme.onSurfaceVariant
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Switch(
                                     checked = appSettingsAdBlocker,
-                                    onCheckedChange = { onAdBlockerToggle() },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color(0xFF00E5FF),
-                                        checkedTrackColor = Color(0xFF004D59)
-                                    )
+                                    onCheckedChange = { onAdBlockerToggle() }
                                 )
                             }
                         },
@@ -1318,24 +1331,24 @@ fun AppleOmnibar(
                             Icon(
                                 Icons.Default.Shield,
                                 contentDescription = null,
-                                tint = if (appSettingsAdBlocker) Color(0xFF00E5FF) else Color(0xFF78909C)
+                                tint = if (appSettingsAdBlocker) colorScheme.primary else colorScheme.onSurfaceVariant
                             )
                         },
                         onClick = onAdBlockerToggle
                     )
 
-                    HorizontalDivider(color = Color(0xFF142B39))
+                    HorizontalDivider(color = colorScheme.outlineVariant)
                     DropdownMenuItem(
-                        text = { Text("New Tab", color = Color.White) },
-                        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF00E5FF)) },
+                        text = { Text("New Tab", color = colorScheme.onSurface) },
+                        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, tint = colorScheme.primary) },
                         onClick = onNewTab
                     )
                     DropdownMenuItem(
-                        text = { Text(if (uiState.isIncognito) "Exit Incognito Tab" else "New Incognito Tab", color = Color.White) },
-                        leadingIcon = { Icon(Icons.Default.VpnLock, contentDescription = null, tint = Color(0xFFCFBCFF)) },
+                        text = { Text(if (uiState.isIncognito) "Exit Incognito Tab" else "New Incognito Tab", color = colorScheme.onSurface) },
+                        leadingIcon = { Icon(Icons.Default.VpnLock, contentDescription = null, tint = colorScheme.tertiary) },
                         onClick = onToggleIncognito
                     )
-                    HorizontalDivider(color = Color(0xFF142B39))
+                    HorizontalDivider(color = colorScheme.outlineVariant)
                     DropdownMenuItem(
                         text = {
                             Row(
@@ -1343,18 +1356,14 @@ fun AppleOmnibar(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Desktop Mode", color = Color.White)
+                                Text("Desktop Mode", color = colorScheme.onSurface)
                                 Switch(
                                     checked = uiState.isDesktopMode,
-                                    onCheckedChange = { onToggleDesktopMode() },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color(0xFF00E5FF),
-                                        checkedTrackColor = Color(0xFF004D59)
-                                    )
+                                    onCheckedChange = { onToggleDesktopMode() }
                                 )
                             }
                         },
-                        leadingIcon = { Icon(Icons.Default.DesktopWindows, contentDescription = null, tint = Color(0xFF90A4AE)) },
+                        leadingIcon = { Icon(Icons.Default.DesktopWindows, contentDescription = null, tint = colorScheme.onSurfaceVariant) },
                         onClick = onToggleDesktopMode
                     )
                     DropdownMenuItem(
@@ -1364,30 +1373,26 @@ fun AppleOmnibar(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("JavaScript", color = Color.White)
+                                Text("JavaScript", color = colorScheme.onSurface)
                                 Switch(
                                     checked = uiState.isJavaScriptEnabled,
-                                    onCheckedChange = { onToggleJavaScript() },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color(0xFF00E5FF),
-                                        checkedTrackColor = Color(0xFF004D59)
-                                    )
+                                    onCheckedChange = { onToggleJavaScript() }
                                 )
                             }
                         },
-                        leadingIcon = { Icon(Icons.Default.Javascript, contentDescription = null, tint = Color(0xFF90A4AE)) },
+                        leadingIcon = { Icon(Icons.Default.Javascript, contentDescription = null, tint = colorScheme.onSurfaceVariant) },
                         onClick = onToggleJavaScript
                     )
-                    HorizontalDivider(color = Color(0xFF142B39))
+                    HorizontalDivider(color = colorScheme.outlineVariant)
                     DropdownMenuItem(
-                        text = { Text("Share Page", color = Color.White) },
-                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF90A4AE)) },
+                        text = { Text("Share Page", color = colorScheme.onSurface) },
+                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = colorScheme.onSurfaceVariant) },
                         onClick = onShare,
                         enabled = uiState.currentLoadedUrl != null
                     )
                     DropdownMenuItem(
-                        text = { Text("Reload", color = Color.White) },
-                        leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null, tint = Color(0xFF90A4AE)) },
+                        text = { Text("Reload", color = colorScheme.onSurface) },
+                        leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null, tint = colorScheme.onSurfaceVariant) },
                         onClick = onReload,
                         enabled = uiState.currentLoadedUrl != null
                     )
@@ -1395,7 +1400,6 @@ fun AppleOmnibar(
             }
         }
 
-        // Sleek Gradient Progress Indicator with fluid width animation
         val animatedProgress by animateFloatAsState(
             targetValue = if (uiState.isLoading) (uiState.progress / 100f).coerceIn(0.08f, 1f) else 0f,
             animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing),
@@ -1406,7 +1410,7 @@ fun AppleOmnibar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(2.5.dp)
-                    .background(Color(0xFF071118))
+                    .background(colorScheme.surfaceContainerHighest)
             ) {
                 Box(
                     modifier = Modifier
@@ -1415,8 +1419,8 @@ fun AppleOmnibar(
                         .background(
                             Brush.horizontalGradient(
                                 listOf(
-                                    Color(0xFF00E5FF),
-                                    Color(0xFF0077B6)
+                                    colorScheme.primary,
+                                    colorScheme.secondary
                                 )
                             )
                         )
@@ -1479,6 +1483,7 @@ fun AdBlockShieldPill(
     blockedCount: Int,
     onClick: () -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -1495,10 +1500,10 @@ fun AdBlockShieldPill(
                 scaleY = scale
             }
             .clip(CircleShape)
-            .background(if (isEnabled) Color(0x33005B66) else Color(0xFF0E1A24))
+            .background(if (isEnabled) colorScheme.primaryContainer else colorScheme.surfaceContainerHigh)
             .border(
                 width = 1.dp,
-                color = if (isEnabled) Color(0xFF00E5FF).copy(alpha = 0.6f) else Color(0xFF1B3242),
+                color = if (isEnabled) colorScheme.primary.copy(alpha = 0.5f) else colorScheme.outlineVariant,
                 shape = CircleShape
             )
             .clickable(interactionSource = interactionSource, indication = null) { onClick() }
@@ -1512,14 +1517,14 @@ fun AdBlockShieldPill(
             Icon(
                 imageVector = Icons.Default.Shield,
                 contentDescription = "Shield",
-                tint = if (isEnabled) Color(0xFF00E5FF) else Color(0xFF6B8092),
+                tint = if (isEnabled) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(14.dp)
             )
             Text(
                 text = if (isEnabled) "$blockedCount" else "Off",
                 fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (isEnabled) Color(0xFF00E5FF) else Color(0xFF6B8092)
+                color = if (isEnabled) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant
             )
         }
     }
@@ -1531,6 +1536,7 @@ fun TabCountButton(
     isIncognito: Boolean,
     onClick: () -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -1547,10 +1553,10 @@ fun TabCountButton(
                 scaleY = scale
             }
             .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFF0E1A24))
+            .background(colorScheme.surfaceContainerHigh)
             .border(
                 width = 1.dp,
-                color = if (isIncognito) Color(0xFF8B5CF6) else Color(0xFF00A8C6),
+                color = if (isIncognito) colorScheme.tertiary else colorScheme.primary,
                 shape = RoundedCornerShape(10.dp)
             )
             .clickable(interactionSource = interactionSource, indication = null) { onClick() },
@@ -1560,13 +1566,13 @@ fun TabCountButton(
             text = "$tabCount",
             fontSize = 12.sp,
             fontWeight = FontWeight.Black,
-            color = if (isIncognito) Color(0xFFCFBCFF) else Color(0xFF00E5FF)
+            color = if (isIncognito) colorScheme.tertiary else colorScheme.primary
         )
     }
 }
 
 /**
- * Modern, Ultra-Clean Apple & Cyberpunk Redesigned Browser Home Dashboard.
+ * Browser Home Dashboard using Material 3 semantic color tokens.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1580,18 +1586,20 @@ fun BrowserHomeDashboard(
     onPinSiteClick: () -> Unit,
     onRemoveFavourite: (FavouriteSite) -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     val scrollState = rememberScrollState()
     val clipboardManager = LocalClipboardManager.current
     val haptic = LocalHapticFeedback.current
     var searchInput by remember { mutableStateOf("") }
 
     val clipText = clipboardManager.getText()?.text
-    val hasClipboardUrl = !clipText.isNullOrBlank() && 
+    val hasClipboardUrl = !clipText.isNullOrBlank() &&
         (clipText.startsWith("http://", ignoreCase = true) || clipText.startsWith("https://", ignoreCase = true))
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(colorScheme.background)
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
@@ -1602,8 +1610,8 @@ fun BrowserHomeDashboard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(18.dp))
-                    .background(Color(0x228B5CF6))
-                    .border(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f), RoundedCornerShape(18.dp))
+                    .background(colorScheme.tertiaryContainer)
+                    .border(1.dp, colorScheme.tertiary.copy(alpha = 0.4f), RoundedCornerShape(18.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
                 Row(
@@ -1613,13 +1621,13 @@ fun BrowserHomeDashboard(
                     Icon(
                         imageVector = Icons.Default.VpnLock,
                         contentDescription = null,
-                        tint = Color(0xFFCFBCFF),
+                        tint = colorScheme.onTertiaryContainer,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
                         text = "Incognito Tab • History, cookies & caches discarded on close",
                         fontSize = 12.sp,
-                        color = Color(0xFFCFBCFF),
+                        color = colorScheme.onTertiaryContainer,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -1634,26 +1642,18 @@ fun BrowserHomeDashboard(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Glowing Cyberpunk Emblem
             Box(
                 modifier = Modifier
                     .size(56.dp)
                     .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            listOf(
-                                Color(0x3300E5FF),
-                                Color(0x0500E5FF)
-                            )
-                        )
-                    )
-                    .border(1.5.dp, Color(0xFF00E5FF).copy(alpha = 0.6f), CircleShape),
+                    .background(colorScheme.primaryContainer)
+                    .border(1.5.dp, colorScheme.primary.copy(alpha = 0.45f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Bolt,
                     contentDescription = "UDM Browser",
-                    tint = Color(0xFF00E5FF),
+                    tint = colorScheme.onPrimaryContainer,
                     modifier = Modifier.size(28.dp)
                 )
             }
@@ -1665,18 +1665,17 @@ fun BrowserHomeDashboard(
                     fontSize = 22.sp,
                     letterSpacing = (-0.3).sp
                 ),
-                color = Color.White
+                color = colorScheme.onBackground
             )
 
-            // Switch Search Engine Chip
             Surface(
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onSearchEngineClick()
                 },
                 shape = CircleShape,
-                color = Color(0xFF081520),
-                border = BorderStroke(1.dp, Color(0xFF152F42))
+                color = colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, colorScheme.outlineVariant)
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
@@ -1686,19 +1685,19 @@ fun BrowserHomeDashboard(
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
-                        tint = Color(0xFF00E5FF),
+                        tint = colorScheme.primary,
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
                         text = selectedSearchEngine.displayName,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFFCFDCE5)
+                        color = colorScheme.onSurface
                     )
                     Text(
                         text = "▾",
                         fontSize = 11.sp,
-                        color = Color(0xFF718C9E)
+                        color = colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -1708,8 +1707,8 @@ fun BrowserHomeDashboard(
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(22.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF07131D)),
-            border = BorderStroke(1.dp, Color(0xFF142B39))
+            colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainerLow),
+            border = BorderStroke(1.dp, colorScheme.outlineVariant)
         ) {
             Column(
                 modifier = Modifier
@@ -1722,8 +1721,8 @@ fun BrowserHomeDashboard(
                         .fillMaxWidth()
                         .height(48.dp)
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF040A0F))
-                        .border(1.dp, Color(0xFF142C3D), RoundedCornerShape(14.dp))
+                        .background(colorScheme.surface)
+                        .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(14.dp))
                         .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1731,7 +1730,7 @@ fun BrowserHomeDashboard(
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
-                        tint = Color(0xFF6B8092),
+                        tint = colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )
 
@@ -1739,7 +1738,7 @@ fun BrowserHomeDashboard(
                         if (searchInput.isEmpty()) {
                             Text(
                                 text = "Search ${selectedSearchEngine.displayName} or enter URL...",
-                                color = Color(0xFF5E7385),
+                                color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 fontSize = 13.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1751,11 +1750,11 @@ fun BrowserHomeDashboard(
                             onValueChange = { searchInput = it },
                             singleLine = true,
                             textStyle = TextStyle(
-                                color = Color.White,
+                                color = colorScheme.onSurface,
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Normal
                             ),
-                            cursorBrush = SolidColor(Color(0xFF00E5FF)),
+                            cursorBrush = SolidColor(colorScheme.primary),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                             keyboardActions = KeyboardActions(onGo = {
                                 if (searchInput.isNotBlank()) {
@@ -1775,13 +1774,12 @@ fun BrowserHomeDashboard(
                             Icon(
                                 imageVector = Icons.Default.Clear,
                                 contentDescription = "Clear",
-                                tint = Color(0xFF889DA8),
+                                tint = colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(14.dp)
                             )
                         }
                     }
 
-                    // Go / Sniff Action Button
                     Surface(
                         onClick = {
                             if (searchInput.isNotBlank()) {
@@ -1790,8 +1788,8 @@ fun BrowserHomeDashboard(
                             }
                         },
                         shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF00E5FF),
-                        contentColor = Color(0xFF001F24)
+                        color = colorScheme.primary,
+                        contentColor = colorScheme.onPrimary
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -1820,8 +1818,8 @@ fun BrowserHomeDashboard(
                             onPasteAndDownload(clipText!!)
                         },
                         shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF00E5FF).copy(alpha = 0.08f),
-                        border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.35f)),
+                        color = colorScheme.primaryContainer.copy(alpha = 0.55f),
+                        border = BorderStroke(1.dp, colorScheme.primary.copy(alpha = 0.4f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -1837,7 +1835,7 @@ fun BrowserHomeDashboard(
                                 Icon(
                                     imageVector = Icons.Default.ContentPaste,
                                     contentDescription = null,
-                                    tint = Color(0xFF00E5FF),
+                                    tint = colorScheme.onPrimaryContainer,
                                     modifier = Modifier.size(15.dp)
                                 )
                                 Column {
@@ -1845,12 +1843,12 @@ fun BrowserHomeDashboard(
                                         text = "Link detected in clipboard",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF00E5FF)
+                                        color = colorScheme.onPrimaryContainer
                                     )
                                     Text(
                                         text = clipText!!,
                                         fontSize = 11.sp,
-                                        color = Color(0xFF8BA2B4),
+                                        color = colorScheme.onSurfaceVariant,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -1861,7 +1859,7 @@ fun BrowserHomeDashboard(
                                 text = "Sniff & Open",
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00E5FF)
+                                color = colorScheme.primary
                             )
                         }
                     }
@@ -1869,7 +1867,7 @@ fun BrowserHomeDashboard(
             }
         }
 
-        // 4. Speed Dial / Favourites Section (4-column grid + Add button)
+        // 4. Speed Dial / Favourites Section
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
                 modifier = Modifier
@@ -1886,20 +1884,20 @@ fun BrowserHomeDashboard(
                         text = "Speed Dial",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = colorScheme.onBackground
                     )
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF0D2535))
-                            .border(1.dp, Color(0xFF1B445E), RoundedCornerShape(8.dp))
+                            .background(colorScheme.secondaryContainer)
+                            .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(8.dp))
                             .padding(horizontal = 7.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = "${favourites.size}",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00E5FF)
+                            color = colorScheme.onSecondaryContainer
                         )
                     }
                 }
@@ -1910,8 +1908,8 @@ fun BrowserHomeDashboard(
                         onPinSiteClick()
                     },
                     shape = CircleShape,
-                    color = Color(0xFF00E5FF).copy(alpha = 0.12f),
-                    border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.4f))
+                    color = colorScheme.primaryContainer,
+                    border = BorderStroke(1.dp, colorScheme.primary.copy(alpha = 0.4f))
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -1921,22 +1919,21 @@ fun BrowserHomeDashboard(
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = "Add",
-                            tint = Color(0xFF00E5FF),
+                            tint = colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(13.dp)
                         )
                         Text(
                             text = "Add Portal",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00E5FF)
+                            color = colorScheme.onPrimaryContainer
                         )
                     }
                 }
             }
 
-            // 4-column flow layout
             val allItems = favourites
-            val rows = (allItems.size + 1 + 3) / 4 // +1 for the Add card
+            val rows = (allItems.size + 1 + 3) / 4
 
             for (rowIndex in 0 until rows) {
                 Row(
@@ -1947,7 +1944,16 @@ fun BrowserHomeDashboard(
                         val itemIndex = rowIndex * 4 + colIndex
                         if (itemIndex < allItems.size) {
                             val site = allItems[itemIndex]
-                            val accentColor = remember(site.colorHex) { parseHexColor(site.colorHex) }
+                            val primaryFallback = colorScheme.primary
+                            val isLightSurface = colorScheme.surface.luminance() > 0.5f
+                            val accentColor = remember(site.colorHex, isLightSurface, primaryFallback) {
+                                if (site.colorHex.equals("#00E5FF", ignoreCase = true)) {
+                                    primaryFallback
+                                } else {
+                                    val parsed = parseHexColor(site.colorHex, primaryFallback)
+                                    if (isLightSurface && parsed.luminance() > 0.65f) primaryFallback else parsed
+                                }
+                            }
                             val siteIcon = remember(site.url) { getFavouriteIcon(site.url) }
 
                             Card(
@@ -1964,8 +1970,8 @@ fun BrowserHomeDashboard(
                                         }
                                     ),
                                 shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF08141F)),
-                                border = BorderStroke(1.dp, Color(0xFF132838))
+                                colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainerLow),
+                                border = BorderStroke(1.dp, colorScheme.outlineVariant)
                             ) {
                                 Column(
                                     modifier = Modifier
@@ -1978,7 +1984,7 @@ fun BrowserHomeDashboard(
                                         modifier = Modifier
                                             .size(42.dp)
                                             .clip(CircleShape)
-                                            .background(accentColor.copy(alpha = 0.15f))
+                                            .background(accentColor.copy(alpha = 0.14f))
                                             .border(1.dp, accentColor.copy(alpha = 0.45f), CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -1993,7 +1999,7 @@ fun BrowserHomeDashboard(
                                         text = site.title,
                                         fontSize = 11.5.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = Color.White,
+                                        color = colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -2001,14 +2007,13 @@ fun BrowserHomeDashboard(
                                         text = site.badge,
                                         fontSize = 8.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF00E5FF).copy(alpha = 0.85f),
+                                        color = colorScheme.primary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
                         } else if (itemIndex == allItems.size) {
-                            // Add Site Tile
                             Card(
                                 modifier = Modifier
                                     .weight(1f)
@@ -2017,8 +2022,8 @@ fun BrowserHomeDashboard(
                                         onPinSiteClick()
                                     },
                                 shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF050E16)),
-                                border = BorderStroke(1.dp, Color(0xFF152A38))
+                                colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainer),
+                                border = BorderStroke(1.dp, colorScheme.outlineVariant)
                             ) {
                                 Column(
                                     modifier = Modifier
@@ -2031,14 +2036,14 @@ fun BrowserHomeDashboard(
                                         modifier = Modifier
                                             .size(42.dp)
                                             .clip(CircleShape)
-                                            .background(Color(0xFF0F2536))
-                                            .border(1.dp, Color(0xFF1E435E), CircleShape),
+                                            .background(colorScheme.secondaryContainer)
+                                            .border(1.dp, colorScheme.outlineVariant, CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Add,
                                             contentDescription = "Add Portal",
-                                            tint = Color(0xFF00E5FF),
+                                            tint = colorScheme.onSecondaryContainer,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
@@ -2046,20 +2051,19 @@ fun BrowserHomeDashboard(
                                         text = "Add",
                                         fontSize = 11.5.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xFF8BA2B4),
+                                        color = colorScheme.onSurface,
                                         maxLines = 1
                                     )
                                     Text(
                                         text = "Custom",
                                         fontSize = 8.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF5D7586),
+                                        color = colorScheme.onSurfaceVariant,
                                         maxLines = 1
                                     )
                                 }
                             }
                         } else {
-                            // Blank spacer to preserve 4-column alignment
                             Spacer(modifier = Modifier.weight(1f))
                         }
                     }
@@ -2071,8 +2075,8 @@ fun BrowserHomeDashboard(
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF061019)),
-            border = BorderStroke(1.dp, Color(0xFF0E2333))
+            colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainerLow),
+            border = BorderStroke(1.dp, colorScheme.outlineVariant)
         ) {
             Column(
                 modifier = Modifier
@@ -2087,14 +2091,14 @@ fun BrowserHomeDashboard(
                     Icon(
                         imageVector = Icons.Default.Shield,
                         contentDescription = null,
-                        tint = Color(0xFF00E5FF),
+                        tint = colorScheme.primary,
                         modifier = Modifier.size(14.dp)
                     )
                     Text(
                         text = "Engine Shields & Protocol Telemetry",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFFCFDCE5)
+                        color = colorScheme.onSurface
                     )
                 }
 
@@ -2116,13 +2120,13 @@ fun BrowserHomeDashboard(
                                 modifier = Modifier
                                     .size(24.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF00E5FF).copy(alpha = 0.12f)),
+                                    .background(colorScheme.primaryContainer),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = icon,
                                     contentDescription = null,
-                                    tint = Color(0xFF00E5FF),
+                                    tint = colorScheme.onPrimaryContainer,
                                     modifier = Modifier.size(12.dp)
                                 )
                             }
@@ -2131,12 +2135,12 @@ fun BrowserHomeDashboard(
                                     text = title,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    color = colorScheme.onSurface
                                 )
                                 Text(
                                     text = desc,
                                     fontSize = 9.5.sp,
-                                    color = Color(0xFF70899B)
+                                    color = colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -2145,14 +2149,10 @@ fun BrowserHomeDashboard(
             }
         }
 
-        // Bottom space so content is never obscured by the floating bottom navigation bar
         Spacer(modifier = Modifier.height(96.dp))
     }
 }
 
-/**
- * Helper to identify popular platforms or provide a clean default icon.
- */
 fun getFavouriteIcon(url: String): ImageVector {
     val lower = url.lowercase()
     return when {
@@ -2165,10 +2165,7 @@ fun getFavouriteIcon(url: String): ImageVector {
     }
 }
 
-/**
- * Safely parse a color hex string like #00E5FF into a Jetpack Compose Color.
- */
-fun parseHexColor(hex: String, fallback: Color = Color(0xFF00E5FF)): Color {
+fun parseHexColor(hex: String, fallback: Color = Color(0xFF006874)): Color {
     return try {
         Color(android.graphics.Color.parseColor(hex))
     } catch (_: Exception) {
@@ -2177,7 +2174,7 @@ fun parseHexColor(hex: String, fallback: Color = Color(0xFF00E5FF)): Color {
 }
 
 /**
- * Glassmorphic Dialog to Pin a custom site into Favourites.
+ * Dialog to Pin a custom site into Favourites.
  */
 @Composable
 fun PinFavouriteDialog(
@@ -2186,19 +2183,20 @@ fun PinFavouriteDialog(
     onDismiss: () -> Unit,
     onPin: (title: String, url: String, colorHex: String) -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     var title by remember { mutableStateOf(initialTitle ?: "") }
     var url by remember { mutableStateOf(initialUrl ?: "") }
-    var selectedColor by remember { mutableStateOf("#00E5FF") }
+    var selectedColor by remember { mutableStateOf("#00838F") }
     val clipboardManager = LocalClipboardManager.current
     val haptic = LocalHapticFeedback.current
 
     val colors = listOf(
-        "#00E5FF" to "Neon Cyan",
-        "#FF0033" to "Crimson",
-        "#FF5500" to "Orange",
-        "#0066DC" to "Blue",
-        "#8B5CF6" to "Purple",
-        "#EAA610" to "Gold"
+        "#00838F" to "Ocean Teal",
+        "#D32F2F" to "Crimson",
+        "#E65100" to "Orange",
+        "#1565C0" to "Blue",
+        "#6A1B9A" to "Purple",
+        "#B26A00" to "Gold"
     )
 
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
@@ -2207,8 +2205,8 @@ fun PinFavouriteDialog(
                 .fillMaxWidth()
                 .padding(16.dp),
             shape = RoundedCornerShape(26.dp),
-            color = Color(0xFF081521),
-            border = BorderStroke(1.dp, Color(0xFF142B39)),
+            color = colorScheme.surfaceContainerHigh,
+            border = BorderStroke(1.dp, colorScheme.outlineVariant),
             tonalElevation = 8.dp
         ) {
             Column(
@@ -2217,7 +2215,6 @@ fun PinFavouriteDialog(
                     .padding(22.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -2231,14 +2228,14 @@ fun PinFavouriteDialog(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF00E5FF).copy(alpha = 0.15f))
-                                .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.4f), CircleShape),
+                                .background(colorScheme.primaryContainer)
+                                .border(1.dp, colorScheme.primary.copy(alpha = 0.4f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Add,
                                 contentDescription = null,
-                                tint = Color(0xFF00E5FF),
+                                tint = colorScheme.onPrimaryContainer,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -2247,12 +2244,12 @@ fun PinFavouriteDialog(
                                 text = "Pin to Favourite",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp,
-                                color = Color.White
+                                color = colorScheme.onSurface
                             )
                             Text(
                                 text = "Speed-dial shortcut on browser home",
                                 fontSize = 11.5.sp,
-                                color = Color(0xFF889DA8)
+                                color = colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -2261,19 +2258,18 @@ fun PinFavouriteDialog(
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close",
-                            tint = Color(0xFF90A4AE),
+                            tint = colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
                     }
                 }
 
-                // Site Name Input
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         text = "Site Name",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF00E5FF)
+                        color = colorScheme.primary
                     )
                     OutlinedTextField(
                         value = title,
@@ -2283,17 +2279,16 @@ fun PinFavouriteDialog(
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFF050E15),
-                            unfocusedContainerColor = Color(0xFF050E15),
-                            focusedBorderColor = Color(0xFF00E5FF),
-                            unfocusedBorderColor = Color(0xFF1A3547),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
+                            focusedContainerColor = colorScheme.surface,
+                            unfocusedContainerColor = colorScheme.surface,
+                            focusedBorderColor = colorScheme.primary,
+                            unfocusedBorderColor = colorScheme.outlineVariant,
+                            focusedTextColor = colorScheme.onSurface,
+                            unfocusedTextColor = colorScheme.onSurface
                         )
                     )
                 }
 
-                // URL Input with Paste Shortcut
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2304,7 +2299,7 @@ fun PinFavouriteDialog(
                             text = "Site URL",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00E5FF)
+                            color = colorScheme.primary
                         )
                         val clip = clipboardManager.getText()?.text
                         if (!clip.isNullOrBlank() && (clip.startsWith("http://") || clip.startsWith("https://") || clip.contains("."))) {
@@ -2312,7 +2307,7 @@ fun PinFavouriteDialog(
                                 text = "Paste Clipboard",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00E5FF),
+                                color = colorScheme.primary,
                                 modifier = Modifier.clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     url = clip
@@ -2332,23 +2327,22 @@ fun PinFavouriteDialog(
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFF050E15),
-                            unfocusedContainerColor = Color(0xFF050E15),
-                            focusedBorderColor = Color(0xFF00E5FF),
-                            unfocusedBorderColor = Color(0xFF1A3547),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
+                            focusedContainerColor = colorScheme.surface,
+                            unfocusedContainerColor = colorScheme.surface,
+                            focusedBorderColor = colorScheme.primary,
+                            unfocusedBorderColor = colorScheme.outlineVariant,
+                            focusedTextColor = colorScheme.onSurface,
+                            unfocusedTextColor = colorScheme.onSurface
                         )
                     )
                 }
 
-                // Radiant Color Selector
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         text = "Accent Color",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF90A4AE)
+                        color = colorScheme.onSurfaceVariant
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2365,7 +2359,7 @@ fun PinFavouriteDialog(
                                     .background(parsed)
                                     .border(
                                         width = if (isSelected) 3.dp else 1.dp,
-                                        color = if (isSelected) Color.White else Color.Transparent,
+                                        color = if (isSelected) colorScheme.onSurface else Color.Transparent,
                                         shape = CircleShape
                                     )
                                     .clickable {
@@ -2378,7 +2372,7 @@ fun PinFavouriteDialog(
                                     Icon(
                                         imageVector = Icons.Default.CheckCircle,
                                         contentDescription = null,
-                                        tint = Color.White,
+                                        tint = if (parsed.luminance() > 0.5f) Color.Black else Color.White,
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
@@ -2389,7 +2383,6 @@ fun PinFavouriteDialog(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // Action Buttons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -2402,35 +2395,23 @@ fun PinFavouriteDialog(
                         Text("Cancel")
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .weight(1.3f)
-                            .height(42.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(
-                                        Color(0xFF00E5FF),
-                                        Color(0xFF0091EA)
-                                    )
-                                )
-                            )
-                            .clickable {
-                                if (url.isNotBlank()) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    val cleanTitle = title.ifBlank {
-                                        runCatching { java.net.URI(url).host?.removePrefix("www.") }.getOrNull() ?: "Site"
-                                    }
-                                    onPin(cleanTitle, url, selectedColor)
+                    androidx.compose.material3.Button(
+                        onClick = {
+                            if (url.isNotBlank()) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                val cleanTitle = title.ifBlank {
+                                    runCatching { java.net.URI(url).host?.removePrefix("www.") }.getOrNull() ?: "Site"
                                 }
-                            },
-                        contentAlignment = Alignment.Center
+                                onPin(cleanTitle, url, selectedColor)
+                            }
+                        },
+                        modifier = Modifier.weight(1.3f),
+                        shape = RoundedCornerShape(14.dp)
                     ) {
                         Text(
                             text = "Pin to Favourite",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = Color(0xFF001F24)
+                            fontSize = 13.sp
                         )
                     }
                 }
@@ -2448,14 +2429,16 @@ fun RemoveFavouriteConfirmDialog(
     onDismiss: () -> Unit,
     onConfirmRemove: () -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
+
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(20.dp),
             shape = RoundedCornerShape(24.dp),
-            color = Color(0xFF0B1721),
-            border = BorderStroke(1.dp, Color(0xFF142B39)),
+            color = colorScheme.surfaceContainerHigh,
+            border = BorderStroke(1.dp, colorScheme.outlineVariant),
             tonalElevation = 6.dp
         ) {
             Column(
@@ -2472,13 +2455,13 @@ fun RemoveFavouriteConfirmDialog(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(Color(0x33FF0033)),
+                            .background(colorScheme.errorContainer),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = null,
-                            tint = Color(0xFFFF5252),
+                            tint = colorScheme.onErrorContainer,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -2486,14 +2469,14 @@ fun RemoveFavouriteConfirmDialog(
                         text = "Remove from Favourite?",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
-                        color = Color.White
+                        color = colorScheme.onSurface
                     )
                 }
 
                 Text(
                     text = "Do you want to remove \"${site.title}\" (${site.url}) from your Favourite speed-dial list?",
                     fontSize = 12.5.sp,
-                    color = Color(0xFF90A4AE)
+                    color = colorScheme.onSurfaceVariant
                 )
 
                 Row(
@@ -2508,20 +2491,19 @@ fun RemoveFavouriteConfirmDialog(
                         Text("Cancel")
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(40.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFD32F2F))
-                            .clickable { onConfirmRemove() },
-                        contentAlignment = Alignment.Center
+                    androidx.compose.material3.Button(
+                        onClick = onConfirmRemove,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = colorScheme.error,
+                            contentColor = colorScheme.onError
+                        )
                     ) {
                         Text(
                             text = "Remove",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = Color.White
+                            fontSize = 13.sp
                         )
                     }
                 }
@@ -2530,10 +2512,30 @@ fun RemoveFavouriteConfirmDialog(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF071118)
+@Preview(name = "Browser Home - Light", showBackground = true)
 @Composable
-fun BrowserHomeDashboardPreview() {
-    UDMTheme {
+fun BrowserHomeDashboardLightPreview() {
+    UDMTheme(darkTheme = false, dynamicColor = false) {
+        BrowserHomeDashboard(
+            isIncognito = false,
+            selectedSearchEngine = SearchEngine.DUCKDUCKGO,
+            favourites = listOf(
+                FavouriteSite(title = "YouTube", url = "https://m.youtube.com", badge = "4K AV1", colorHex = "#FF0033"),
+                FavouriteSite(title = "Vimeo", url = "https://vimeo.com", badge = "1080p Studio", colorHex = "#00ADEF")
+            ),
+            onSearchEngineClick = {},
+            onBookmarkClicked = {},
+            onPasteAndDownload = {},
+            onPinSiteClick = {},
+            onRemoveFavourite = {}
+        )
+    }
+}
+
+@Preview(name = "Browser Home - Dark", showBackground = true)
+@Composable
+fun BrowserHomeDashboardDarkPreview() {
+    UDMTheme(darkTheme = true, dynamicColor = false) {
         BrowserHomeDashboard(
             isIncognito = false,
             selectedSearchEngine = SearchEngine.DUCKDUCKGO,
