@@ -1,7 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+}
+
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) {
+        val text = file.readText(Charsets.UTF_8).removePrefix("\uFEFF")
+        load(text.reader())
+    }
 }
 
 android {
@@ -14,18 +24,33 @@ android {
         applicationId = "com.universal.dm"
         minSdk = 31
         targetSdk = 37
-        versionCode = 4
-        versionName = "3.2"
+        versionCode = 5
+        versionName = "3.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
-            isUniversalApk = false
+    signingConfigs {
+        create("release") {
+            val storeFilePath = (keystoreProperties.getProperty("storeFile")
+                ?: System.getenv("UDM_KEYSTORE_PATH"))
+                ?.takeIf { it.isNotBlank() }
+            if (storeFilePath != null && file(storeFilePath).exists()) {
+                storeFile = file(storeFilePath)
+                storePassword = (keystoreProperties.getProperty("storePassword")
+                    ?: System.getenv("UDM_KEYSTORE_PASSWORD"))
+                    ?.takeIf { it.isNotBlank() }
+                keyAlias = (keystoreProperties.getProperty("keyAlias")
+                    ?: System.getenv("UDM_KEY_ALIAS"))
+                    ?.takeIf { it.isNotBlank() }
+                keyPassword = (keystoreProperties.getProperty("keyPassword")
+                    ?: System.getenv("UDM_KEY_PASSWORD"))
+                    ?.takeIf { it.isNotBlank() }
+            }
         }
     }
 
@@ -37,7 +62,12 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            val releaseConfig = signingConfigs.getByName("release")
+            signingConfig = if (releaseConfig.storeFile != null) {
+                releaseConfig
+            } else {
+                signingConfigs.getByName("debug")
+            }
             optimization {
                 enable = true
             }

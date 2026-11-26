@@ -7,8 +7,8 @@ package com.universal.dm.core
 object AppMetadata {
     const val APP_NAME = "Universal Download Manager"
     const val APP_SHORT_NAME = "UDM"
-    const val APP_VERSION = "3.2"
-    const val BUILD_CHANNEL = "V3.2 Release • Turbo Engine"
+    const val APP_VERSION = "3.3"
+    const val BUILD_CHANNEL = "V3.3 Release • Turbo Engine"
 
     // Developer & Maintainer
     const val DEVELOPER_NAME = "Bijoy"
