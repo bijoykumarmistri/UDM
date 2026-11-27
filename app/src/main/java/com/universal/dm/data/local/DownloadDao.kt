@@ -42,6 +42,9 @@ interface DownloadDao {
     @Query("DELETE FROM download_tasks WHERE id = :id")
     suspend fun deleteTaskById(id: String)
 
+    @Query("DELETE FROM download_tasks WHERE status = 'COMPLETED'")
+    suspend fun deleteCompletedTasks()
+
     @Query("UPDATE download_tasks SET downloadedBytes = :downloadedBytes, totalBytes = CASE WHEN :totalBytes > 0 THEN :totalBytes ELSE totalBytes END, speedBytesPerSec = :speedBytesPerSec, status = :status WHERE id = :taskId")
     suspend fun updateTaskProgress(taskId: String, downloadedBytes: Long, totalBytes: Long, speedBytesPerSec: Long, status: DownloadStatus)
 

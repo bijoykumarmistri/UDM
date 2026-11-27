@@ -58,3 +58,13 @@ data class BrowserTab(
     val detectedMedia: DetectedPageMedia? = null,
     val lastAccessedTimestamp: Long = System.currentTimeMillis()
 )
+
+/**
+ * Visited page record for non-incognito browsing history
+ */
+data class BrowserHistoryItem(
+    val id: String = UUID.randomUUID().toString(),
+    val title: String,
+    val url: String,
+    val visitedAt: Long = System.currentTimeMillis()
+)

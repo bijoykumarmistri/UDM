@@ -55,4 +55,15 @@ class MediaSnifferTest {
             sniffer.cleanMediaUrl("https://www.dropbox.com/s/file.zip?dl=1")
         )
     }
+
+    @Test
+    fun `extractYoutubeVideoId extracts ID across watch shorts live embed and shortlinks`() {
+        assertEquals("dQw4w9WgXcQ", sniffer.extractYoutubeVideoId("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+        assertEquals("dQw4w9WgXcQ", sniffer.extractYoutubeVideoId("https://m.youtube.com/watch?list=PL1&v=dQw4w9WgXcQ&t=10"))
+        assertEquals("dQw4w9WgXcQ", sniffer.extractYoutubeVideoId("https://youtu.be/dQw4w9WgXcQ?si=xyz"))
+        assertEquals("shortId99", sniffer.extractYoutubeVideoId("https://www.youtube.com/shorts/shortId99"))
+        assertEquals("liveId88", sniffer.extractYoutubeVideoId("https://www.youtube.com/live/liveId88"))
+        assertEquals("embedId77", sniffer.extractYoutubeVideoId("https://www.youtube.com/embed/embedId77"))
+        assertEquals(null, sniffer.extractYoutubeVideoId("https://vimeo.com/123456"))
+    }
 }

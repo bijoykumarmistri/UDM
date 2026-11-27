@@ -1,22 +1,18 @@
 package com.universal.dm.ui.browser
 
-import android.net.Uri
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Environment
 import android.os.StatFs
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,9 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Audiotrack
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
@@ -47,18 +41,11 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderZip
-import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -66,7 +53,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -81,39 +67,35 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import com.universal.dm.data.model.AudioCodec
 import com.universal.dm.data.model.DetectedPageMedia
 import com.universal.dm.data.model.MediaType
 import com.universal.dm.data.model.StreamVariant
 import com.universal.dm.data.model.VideoCodec
 import com.universal.dm.domain.sniffer.MediaSizeCalculator
+import com.universal.dm.ui.components.UdmIconSquircle
 import com.universal.dm.ui.settings.LocalAppSettings
 import com.universal.dm.ui.theme.UDMTheme
+import com.universal.dm.ui.theme.UdmTextStyles
 import com.universal.dm.ui.theme.UdmTheme
 import java.util.Locale
 import kotlin.math.roundToInt
 
 data class QualitySelectionItem(
     val label: String,
-    val subLabel: String,
-    val badge: String,
-    val badgeColor: Color,
+    val sizeLabel: String,
     val height: Int,
     val bitrateKbps: Int,
     val matchedVariant: StreamVariant?
@@ -121,11 +103,7 @@ data class QualitySelectionItem(
 
 data class CodecSelectionOption(
     val codecName: String,
-    val tag: String,
-    val badge: String,
-    val featureHighlight: String,
     val sizeText: String,
-    val accentColor: Color,
     val matchedVariant: StreamVariant?,
     val extension: String
 )
@@ -157,17 +135,7 @@ fun DownloadConfigBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = colorScheme.surfaceContainerLow,
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 12.dp)
-                    .width(42.dp)
-                    .height(4.5.dp)
-                    .clip(CircleShape)
-                    .background(colorScheme.outlineVariant)
-            )
-        }
+        containerColor = colorScheme.surfaceContainerLow
     ) {
         DownloadConfigContent(
             detectedMedia = detectedMedia,
@@ -198,18 +166,17 @@ fun DownloadConfigContent(
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
-    val clipboardManager = LocalClipboardManager.current
     val appSettings = LocalAppSettings.current
     val scrollState = rememberScrollState()
     val colorScheme = MaterialTheme.colorScheme
     val extendedColors = UdmTheme.extendedColors
 
     val isDirectFile = detectedMedia.isDirectFile ||
-            (detectedMedia.videoVariants.isEmpty() && detectedMedia.audioVariants.isEmpty())
+        (detectedMedia.videoVariants.isEmpty() && detectedMedia.audioVariants.isEmpty())
 
     val detectedExtension = remember(detectedMedia) {
         val fromVariant = detectedMedia.directFileVariant?.containerExt?.takeIf { it.isNotBlank() }
-        val fromUrl = detectedMedia.directFileUrl?.let { Uri.parse(it).path?.substringAfterLast('.', "") }?.takeIf { it.isNotBlank() }
+        val fromUrl = detectedMedia.directFileUrl?.let { it.toUri().path?.substringAfterLast('.', "") }?.takeIf { it.isNotBlank() }
         val fromTitle = detectedMedia.pageTitle.substringAfterLast('.', "").takeIf { it.isNotBlank() && it.length <= 5 }
         (fromVariant ?: fromUrl ?: fromTitle ?: "bin").lowercase(Locale.ROOT)
     }
@@ -245,37 +212,35 @@ fun DownloadConfigContent(
     var isWifiOnly by remember { mutableStateOf(appSettings.wifiOnlyDownloads) }
 
     val freeStorageBytes = remember {
-        try {
+        runCatching {
             val stat = StatFs(Environment.getDataDirectory().path)
             stat.availableBlocksLong * stat.blockSizeLong
-        } catch (_: Exception) {
-            48_000_000_000L
-        }
+        }.getOrDefault(48_000_000_000L)
     }
 
-    val videoQualityOptions = remember(detectedMedia.videoVariants, detectedMedia.durationSeconds, colorScheme, extendedColors) {
+    val videoQualityOptions = remember(detectedMedia.videoVariants, detectedMedia.durationSeconds) {
         val standardHeights = listOf(
-            Triple(2160, "2160p 4K", Pair("Ultra HD", extendedColors.warning)),
-            Triple(1440, "1440p QHD", Pair("Quad HD", colorScheme.tertiary)),
-            Triple(1080, "1080p FHD", Pair("Most Popular", colorScheme.primary)),
-            Triple(720, "720p HD", Pair("High Def", colorScheme.secondary)),
-            Triple(480, "480p SD", Pair("Standard", colorScheme.secondary)),
-            Triple(360, "360p", Pair("Data Saver", extendedColors.success))
+            2160 to "2160p 4K",
+            1440 to "1440p",
+            1080 to "1080p",
+            720 to "720p",
+            480 to "480p",
+            360 to "360p"
         )
 
         val availableVariantsByHeight = detectedMedia.videoVariants.groupBy { it.resolutionHeight }
         val result = mutableListOf<QualitySelectionItem>()
         val duration = detectedMedia.durationSeconds
 
-        standardHeights.forEach { (height, label, badgePair) ->
+        standardHeights.forEach { (height, label) ->
             val match = availableVariantsByHeight[height]?.firstOrNull()
             val hasNearbyVariant = detectedMedia.videoVariants.find { it.resolutionHeight in (height - 60)..(height + 60) }
 
             if (match != null || hasNearbyVariant != null) {
                 val variant = match ?: hasNearbyVariant
                 val isExactOrNearby = variant != null && kotlin.math.abs(variant.resolutionHeight - height) <= 60
-                val computedBytes = if (isExactOrNearby && (variant?.fileSizeBytes ?: 0L) > 0) {
-                    variant!!.fileSizeBytes
+                val computedBytes = if (isExactOrNearby && (variant.fileSizeBytes) > 0) {
+                    variant.fileSizeBytes
                 } else {
                     MediaSizeCalculator.calculateVideoTotalBytes(
                         height = height,
@@ -289,9 +254,7 @@ fun DownloadConfigContent(
                 result.add(
                     QualitySelectionItem(
                         label = label,
-                        subLabel = MediaSizeCalculator.formatFileSize(computedBytes),
-                        badge = badgePair.first,
-                        badgeColor = badgePair.second,
+                        sizeLabel = MediaSizeCalculator.formatFileSize(computedBytes),
                         height = height,
                         bitrateKbps = variant?.bitrateKbps ?: 0,
                         matchedVariant = variant?.copy(fileSizeBytes = computedBytes) ?: variant
@@ -316,9 +279,7 @@ fun DownloadConfigContent(
                 result.add(
                     QualitySelectionItem(
                         label = v.qualityLabel,
-                        subLabel = MediaSizeCalculator.formatFileSize(computedBytes),
-                        badge = "Native",
-                        badgeColor = colorScheme.primary,
+                        sizeLabel = MediaSizeCalculator.formatFileSize(computedBytes),
                         height = v.resolutionHeight,
                         bitrateKbps = v.bitrateKbps,
                         matchedVariant = v.copy(fileSizeBytes = computedBytes)
@@ -328,7 +289,7 @@ fun DownloadConfigContent(
         }
 
         if (result.isEmpty() && detectedMedia.directFileUrl != null && !isDirectFile) {
-            standardHeights.filter { it.first <= 1080 }.forEach { (height, label, badgePair) ->
+            standardHeights.filter { it.first <= 1080 }.forEach { (height, label) ->
                 val fallbackBytes = MediaSizeCalculator.calculateVideoTotalBytes(
                     height = height,
                     codec = VideoCodec.H264,
@@ -338,9 +299,7 @@ fun DownloadConfigContent(
                 result.add(
                     QualitySelectionItem(
                         label = label,
-                        subLabel = MediaSizeCalculator.formatFileSize(fallbackBytes),
-                        badge = badgePair.first,
-                        badgeColor = badgePair.second,
+                        sizeLabel = MediaSizeCalculator.formatFileSize(fallbackBytes),
                         height = height,
                         bitrateKbps = MediaSizeCalculator.getBaselineVideoBitrateKbps(height),
                         matchedVariant = null
@@ -351,9 +310,9 @@ fun DownloadConfigContent(
         result.sortedByDescending { it.height }
     }
 
-    val audioQualityOptions = remember(detectedMedia.audioVariants, detectedMedia.durationSeconds, detectedMedia.directFileUrl, isDirectFile, colorScheme, extendedColors) {
+    val audioQualityOptions = remember(detectedMedia.audioVariants, detectedMedia.durationSeconds, detectedMedia.directFileUrl, isDirectFile) {
         if (isDirectFile || (detectedMedia.audioVariants.isEmpty() && detectedMedia.directFileUrl == null)) {
-            emptyList<QualitySelectionItem>()
+            emptyList()
         } else {
             val duration = detectedMedia.durationSeconds
             val maxKbpsVariant = detectedMedia.audioVariants.maxByOrNull { it.bitrateKbps }
@@ -366,42 +325,10 @@ fun DownloadConfigContent(
             val saverBytes = MediaSizeCalculator.calculateAudioTotalBytes(64, AudioCodec.M4A, duration)
 
             listOf(
-                QualitySelectionItem(
-                    label = "320 kbps Master",
-                    subLabel = "${MediaSizeCalculator.formatFileSize(masterBytes)} (Audiophile)",
-                    badge = "Ultra Hi-Fi",
-                    badgeColor = extendedColors.warning,
-                    height = 0,
-                    bitrateKbps = 320,
-                    matchedVariant = maxKbpsVariant?.copy(fileSizeBytes = masterBytes, bitrateKbps = 320) ?: maxKbpsVariant
-                ),
-                QualitySelectionItem(
-                    label = "256 kbps Studio",
-                    subLabel = "${MediaSizeCalculator.formatFileSize(studioBytes)} (High Fidelity)",
-                    badge = "Studio Grade",
-                    badgeColor = colorScheme.tertiary,
-                    height = 0,
-                    bitrateKbps = 256,
-                    matchedVariant = maxKbpsVariant?.copy(fileSizeBytes = studioBytes, bitrateKbps = 256) ?: maxKbpsVariant
-                ),
-                QualitySelectionItem(
-                    label = "128 kbps Standard",
-                    subLabel = "${MediaSizeCalculator.formatFileSize(stdBytes)} (Balanced)",
-                    badge = "Crisp AAC",
-                    badgeColor = colorScheme.primary,
-                    height = 0,
-                    bitrateKbps = 128,
-                    matchedVariant = midKbpsVariant?.copy(fileSizeBytes = stdBytes, bitrateKbps = 128) ?: midKbpsVariant
-                ),
-                QualitySelectionItem(
-                    label = "64 kbps Saver",
-                    subLabel = "${MediaSizeCalculator.formatFileSize(saverBytes)} (Compact)",
-                    badge = "Data Saver",
-                    badgeColor = extendedColors.success,
-                    height = 0,
-                    bitrateKbps = 64,
-                    matchedVariant = minKbpsVariant?.copy(fileSizeBytes = saverBytes, bitrateKbps = 64) ?: minKbpsVariant
-                )
+                QualitySelectionItem("320 kbps", MediaSizeCalculator.formatFileSize(masterBytes), 0, 320, maxKbpsVariant?.copy(fileSizeBytes = masterBytes, bitrateKbps = 320) ?: maxKbpsVariant),
+                QualitySelectionItem("256 kbps", MediaSizeCalculator.formatFileSize(studioBytes), 0, 256, maxKbpsVariant?.copy(fileSizeBytes = studioBytes, bitrateKbps = 256) ?: maxKbpsVariant),
+                QualitySelectionItem("128 kbps", MediaSizeCalculator.formatFileSize(stdBytes), 0, 128, midKbpsVariant?.copy(fileSizeBytes = stdBytes, bitrateKbps = 128) ?: midKbpsVariant),
+                QualitySelectionItem("64 kbps", MediaSizeCalculator.formatFileSize(saverBytes), 0, 64, minKbpsVariant?.copy(fileSizeBytes = saverBytes, bitrateKbps = 64) ?: minKbpsVariant)
             )
         }
     }
@@ -427,87 +354,28 @@ fun DownloadConfigContent(
         mutableStateOf(if (selectedMediaType == MediaType.VIDEO) "AV1" else "M4A")
     }
 
-    val videoCodecOptions = remember(selectedQuality, detectedMedia.videoVariants, detectedMedia.durationSeconds, colorScheme) {
+    val videoCodecOptions = remember(selectedQuality, detectedMedia.videoVariants, detectedMedia.durationSeconds) {
         val q = selectedQuality
         val height = q?.height ?: 1080
         val duration = detectedMedia.durationSeconds
-
-        val matchingVariants = detectedMedia.videoVariants.filter {
-            kotlin.math.abs(it.resolutionHeight - height) <= 80
-        }
+        val matchingVariants = detectedMedia.videoVariants.filter { kotlin.math.abs(it.resolutionHeight - height) <= 80 }
 
         val av1Match = matchingVariants.find { it.videoCodec == VideoCodec.AV1 }
         val h264Match = matchingVariants.find { it.videoCodec == VideoCodec.H264 }
         val vp9Match = matchingVariants.find { it.videoCodec == VideoCodec.VP9 }
 
-        val av1Bytes = if ((av1Match?.fileSizeBytes ?: 0L) > 0) {
-            av1Match!!.fileSizeBytes
-        } else {
-            MediaSizeCalculator.calculateVideoTotalBytes(
-                height = height,
-                codec = VideoCodec.AV1,
-                durationSeconds = duration,
-                variantBitrateKbps = av1Match?.bitrateKbps?.takeIf { it > 0 }
-            )
-        }
-
-        val h264Bytes = if ((h264Match?.fileSizeBytes ?: 0L) > 0) {
-            h264Match!!.fileSizeBytes
-        } else {
-            MediaSizeCalculator.calculateVideoTotalBytes(
-                height = height,
-                codec = VideoCodec.H264,
-                durationSeconds = duration,
-                variantBitrateKbps = h264Match?.bitrateKbps?.takeIf { it > 0 }
-            )
-        }
-
-        val vp9Bytes = if ((vp9Match?.fileSizeBytes ?: 0L) > 0) {
-            vp9Match!!.fileSizeBytes
-        } else {
-            MediaSizeCalculator.calculateVideoTotalBytes(
-                height = height,
-                codec = VideoCodec.VP9,
-                durationSeconds = duration,
-                variantBitrateKbps = vp9Match?.bitrateKbps?.takeIf { it > 0 }
-            )
-        }
+        val av1Bytes = av1Match?.fileSizeBytes?.takeIf { it > 0 } ?: MediaSizeCalculator.calculateVideoTotalBytes(height, VideoCodec.AV1, duration, variantBitrateKbps = av1Match?.bitrateKbps?.takeIf { it > 0 })
+        val h264Bytes = h264Match?.fileSizeBytes?.takeIf { it > 0 } ?: MediaSizeCalculator.calculateVideoTotalBytes(height, VideoCodec.H264, duration, variantBitrateKbps = h264Match?.bitrateKbps?.takeIf { it > 0 })
+        val vp9Bytes = vp9Match?.fileSizeBytes?.takeIf { it > 0 } ?: MediaSizeCalculator.calculateVideoTotalBytes(height, VideoCodec.VP9, duration, variantBitrateKbps = vp9Match?.bitrateKbps?.takeIf { it > 0 })
 
         listOf(
-            CodecSelectionOption(
-                codecName = "AV1",
-                tag = "av01",
-                badge = "Next-Gen • 35% Smaller • Hardware Decoded",
-                featureHighlight = "Save up to 40% bandwidth with cutting-edge visual fidelity",
-                sizeText = MediaSizeCalculator.formatFileSize(av1Bytes),
-                accentColor = colorScheme.tertiary,
-                matchedVariant = av1Match?.copy(fileSizeBytes = av1Bytes) ?: q?.matchedVariant?.copy(fileSizeBytes = av1Bytes),
-                extension = "mp4"
-            ),
-            CodecSelectionOption(
-                codecName = "H.264",
-                tag = "avc1",
-                badge = "Universal Playback • Full Compatibility",
-                featureHighlight = "Plays seamlessly on any phone, Smart TV, or PC without transcoding",
-                sizeText = MediaSizeCalculator.formatFileSize(h264Bytes),
-                accentColor = colorScheme.primary,
-                matchedVariant = h264Match?.copy(fileSizeBytes = h264Bytes) ?: q?.matchedVariant?.copy(fileSizeBytes = h264Bytes),
-                extension = "mp4"
-            ),
-            CodecSelectionOption(
-                codecName = "VP9",
-                tag = "vp9",
-                badge = "High Dynamic Range • YouTube Standard",
-                featureHighlight = "Optimized for Google streams with rich color depth and 60fps",
-                sizeText = MediaSizeCalculator.formatFileSize(vp9Bytes),
-                accentColor = colorScheme.secondary,
-                matchedVariant = vp9Match?.copy(fileSizeBytes = vp9Bytes) ?: q?.matchedVariant?.copy(fileSizeBytes = vp9Bytes),
-                extension = "mkv"
-            )
+            CodecSelectionOption("AV1", MediaSizeCalculator.formatFileSize(av1Bytes), av1Match?.copy(fileSizeBytes = av1Bytes) ?: q?.matchedVariant?.copy(fileSizeBytes = av1Bytes), "mp4"),
+            CodecSelectionOption("H.264", MediaSizeCalculator.formatFileSize(h264Bytes), h264Match?.copy(fileSizeBytes = h264Bytes) ?: q?.matchedVariant?.copy(fileSizeBytes = h264Bytes), "mp4"),
+            CodecSelectionOption("VP9", MediaSizeCalculator.formatFileSize(vp9Bytes), vp9Match?.copy(fileSizeBytes = vp9Bytes) ?: q?.matchedVariant?.copy(fileSizeBytes = vp9Bytes), "mkv")
         )
     }
 
-    val audioCodecOptions = remember(selectedQuality, detectedMedia.audioVariants, detectedMedia.durationSeconds, colorScheme, extendedColors) {
+    val audioCodecOptions = remember(selectedQuality, detectedMedia.audioVariants, detectedMedia.durationSeconds) {
         val q = selectedQuality
         val baseRate = q?.bitrateKbps ?: 256
         val duration = detectedMedia.durationSeconds
@@ -521,39 +389,9 @@ fun DownloadConfigContent(
         val mp3Bytes = MediaSizeCalculator.calculateAudioTotalBytes(baseRate, AudioCodec.MP3, duration)
 
         listOf(
-            CodecSelectionOption(
-                codecName = "M4A",
-                tag = "mp4a",
-                badge = "Apple & Android Native AAC • Recommended",
-                featureHighlight = "Hardware-accelerated AAC encoding at $baseRate kbps with full fidelity",
-                sizeText = MediaSizeCalculator.formatFileSize(m4aBytes),
-                accentColor = colorScheme.primary,
-                matchedVariant = m4aMatch?.copy(fileSizeBytes = m4aBytes, bitrateKbps = baseRate)
-                    ?: q?.matchedVariant?.copy(fileSizeBytes = m4aBytes, bitrateKbps = baseRate),
-                extension = "m4a"
-            ),
-            CodecSelectionOption(
-                codecName = "Opus",
-                tag = "opus",
-                badge = "Next-Gen Audio • Pristine 48kHz Clarity",
-                featureHighlight = "Ultra-low distortion Opus stream at $baseRate kbps preserving studio harmonics",
-                sizeText = MediaSizeCalculator.formatFileSize(opusBytes),
-                accentColor = extendedColors.success,
-                matchedVariant = opusMatch?.copy(fileSizeBytes = opusBytes, bitrateKbps = baseRate)
-                    ?: q?.matchedVariant?.copy(fileSizeBytes = opusBytes, bitrateKbps = baseRate),
-                extension = "opus"
-            ),
-            CodecSelectionOption(
-                codecName = "MP3",
-                tag = "mp3",
-                badge = "Universal Legacy Audio • 320kbps Ready",
-                featureHighlight = "LAME-encoded MP3 at $baseRate kbps for high-end audio gear and car stereos",
-                sizeText = MediaSizeCalculator.formatFileSize(mp3Bytes),
-                accentColor = extendedColors.warning,
-                matchedVariant = mp3Match?.copy(fileSizeBytes = mp3Bytes, bitrateKbps = baseRate)
-                    ?: q?.matchedVariant?.copy(fileSizeBytes = mp3Bytes, bitrateKbps = baseRate),
-                extension = "mp3"
-            )
+            CodecSelectionOption("M4A", MediaSizeCalculator.formatFileSize(m4aBytes), m4aMatch?.copy(fileSizeBytes = m4aBytes, bitrateKbps = baseRate) ?: q?.matchedVariant?.copy(fileSizeBytes = m4aBytes, bitrateKbps = baseRate), "m4a"),
+            CodecSelectionOption("Opus", MediaSizeCalculator.formatFileSize(opusBytes), opusMatch?.copy(fileSizeBytes = opusBytes, bitrateKbps = baseRate) ?: q?.matchedVariant?.copy(fileSizeBytes = opusBytes, bitrateKbps = baseRate), "opus"),
+            CodecSelectionOption("MP3", MediaSizeCalculator.formatFileSize(mp3Bytes), mp3Match?.copy(fileSizeBytes = mp3Bytes, bitrateKbps = baseRate) ?: q?.matchedVariant?.copy(fileSizeBytes = mp3Bytes, bitrateKbps = baseRate), "mp3")
         )
     }
 
@@ -569,7 +407,7 @@ fun DownloadConfigContent(
 
     val finalQualityLabel = when (selectedMediaType) {
         MediaType.DIRECT_FILE -> detectedMedia.directFileVariant?.qualityLabel ?: "${detectedExtension.uppercase(Locale.ROOT)} File"
-        MediaType.VIDEO -> selectedQuality?.label ?: "1080p FHD"
+        MediaType.VIDEO -> selectedQuality?.label ?: "1080p"
         MediaType.AUDIO -> "${selectedQuality?.bitrateKbps ?: 256} kbps"
     }
 
@@ -609,9 +447,6 @@ fun DownloadConfigContent(
         }
     }
 
-    val estimatedSeconds = (finalTotalBytes.toDouble() / (8_000_000)).coerceAtLeast(1.0).roundToInt()
-    val etaString = if (estimatedSeconds < 60) "~${estimatedSeconds}s on Wi-Fi" else "~${estimatedSeconds / 60}m ${estimatedSeconds % 60}s"
-
     val emblemBgColor = when (selectedMediaType) {
         MediaType.DIRECT_FILE -> extendedColors.successContainer
         MediaType.VIDEO -> colorScheme.primaryContainer
@@ -622,10 +457,14 @@ fun DownloadConfigContent(
         MediaType.VIDEO -> colorScheme.onPrimaryContainer
         MediaType.AUDIO -> colorScheme.onTertiaryContainer
     }
-    val emblemBorderColor = when (selectedMediaType) {
-        MediaType.DIRECT_FILE -> extendedColors.success.copy(alpha = 0.5f)
-        MediaType.VIDEO -> colorScheme.primary.copy(alpha = 0.5f)
-        MediaType.AUDIO -> colorScheme.tertiary.copy(alpha = 0.5f)
+
+    val domain = remember(detectedMedia.pageUrl) {
+        runCatching { detectedMedia.pageUrl.toUri().host?.removePrefix("www.")?.removePrefix("m.") }.getOrNull() ?: "Web"
+    }
+    val durationText = remember(detectedMedia.durationSeconds) {
+        detectedMedia.durationSeconds?.let { dur ->
+            String.format(Locale.US, "%02d:%02d", dur / 60, dur % 60)
+        }
     }
 
     Column(
@@ -633,817 +472,331 @@ fun DownloadConfigContent(
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
             .verticalScroll(scrollState),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. TOP MEDIA IDENTITY CARD
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainer),
-            border = BorderStroke(1.dp, colorScheme.outlineVariant)
-        ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(58.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(emblemBgColor)
-                            .border(1.dp, emblemBorderColor, RoundedCornerShape(16.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = when (selectedMediaType) {
-                                MediaType.DIRECT_FILE -> when (detectedExtension) {
-                                    "apk", "xapk", "apks" -> Icons.Default.Android
-                                    "zip", "rar", "7z", "tar", "gz", "bz2", "xz" -> Icons.Default.FolderZip
-                                    "pdf" -> Icons.Default.PictureAsPdf
-                                    else -> Icons.AutoMirrored.Filled.InsertDriveFile
-                                }
-                                MediaType.VIDEO -> Icons.Default.Movie
-                                MediaType.AUDIO -> Icons.Default.Audiotrack
-                            },
-                            contentDescription = null,
-                            tint = emblemContentColor,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val domain = runCatching { Uri.parse(detectedMedia.pageUrl).host }.getOrNull() ?: "Web Stream"
-                            Box(
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(colorScheme.surfaceContainerHigh)
-                                    .border(1.dp, colorScheme.outlineVariant, CircleShape)
-                                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Public,
-                                        contentDescription = null,
-                                        tint = colorScheme.primary,
-                                        modifier = Modifier.size(12.dp)
-                                    )
-                                    Text(
-                                        text = domain.removePrefix("www.").removePrefix("m."),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-
-                            detectedMedia.durationSeconds?.let { dur ->
-                                val m = dur / 60
-                                val s = dur % 60
-                                Box(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(colorScheme.surfaceContainerHigh)
-                                        .border(1.dp, colorScheme.outlineVariant, CircleShape)
-                                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Schedule,
-                                            contentDescription = null,
-                                            tint = extendedColors.warning,
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                        Text(
-                                            text = String.format(Locale.US, "%02d:%02d", m, s),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Text(
-                            text = when (selectedMediaType) {
-                                MediaType.DIRECT_FILE -> "Direct ${detectedExtension.uppercase(Locale.ROOT)} File Available"
-                                MediaType.VIDEO -> "High-Definition Video Stream Available"
-                                MediaType.AUDIO -> "Direct Hi-Res Audio Stream Available"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            val directUrl = detectedMedia.directFileUrl ?: detectedMedia.pageUrl
-                            clipboardManager.setText(AnnotatedString(directUrl))
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            Toast.makeText(context, "Direct media stream link copied!", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(colorScheme.surfaceContainerHigh)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "Copy Stream URL",
-                            tint = colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                // Filename Editor
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = colorScheme.surface,
-                    border = BorderStroke(1.dp, colorScheme.outlineVariant)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = null,
-                            tint = colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-
-                        BasicTextField(
-                            value = editableFileName,
-                            onValueChange = { editableFileName = it },
-                            modifier = Modifier.weight(1f),
-                            textStyle = TextStyle(
-                                color = colorScheme.onSurface,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Medium
-                            ),
-                            cursorBrush = SolidColor(colorScheme.primary),
-                            singleLine = true
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(emblemBgColor)
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = ".$finalExtension",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = emblemContentColor
-                            )
-                        }
-
-                        if (editableFileName.isNotBlank()) {
-                            Icon(
-                                imageVector = Icons.Default.Clear,
-                                contentDescription = "Clear",
-                                tint = colorScheme.onSurfaceVariant,
-                                modifier = Modifier
-                                    .size(16.dp)
-                                    .clickable { editableFileName = "" }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. STORAGE GAUGE & SPEED TELEMETRY BAR
-        Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = colorScheme.surfaceContainer,
-            border = BorderStroke(1.dp, colorScheme.outlineVariant)
-        ) {
+        // 1. HEADER & EDITABLE FILE NAME
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 9.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Storage,
-                        contentDescription = null,
-                        tint = if (freeStorageBytes > finalTotalBytes * 2) colorScheme.primary else extendedColors.warning,
-                        modifier = Modifier.size(14.dp)
-                    )
+                UdmIconSquircle(
+                    icon = when (selectedMediaType) {
+                        MediaType.DIRECT_FILE -> when (detectedExtension) {
+                            "apk", "xapk", "apks" -> Icons.Default.Android
+                            "zip", "rar", "7z", "tar", "gz", "bz2", "xz" -> Icons.Default.FolderZip
+                            "pdf" -> Icons.Default.PictureAsPdf
+                            else -> Icons.AutoMirrored.Filled.InsertDriveFile
+                        }
+                        MediaType.VIDEO -> Icons.Default.Movie
+                        MediaType.AUDIO -> Icons.Default.Audiotrack
+                    },
+                    containerColor = emblemBgColor,
+                    contentColor = emblemContentColor,
+                    size = 46.dp,
+                    iconSize = 23.dp,
+                    cornerRadius = 14.dp
+                )
+
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Free: ${MediaSizeCalculator.formatFileSize(freeStorageBytes)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colorScheme.onSurface,
-                        fontWeight = FontWeight.SemiBold
+                        text = if (isDirectFile) "Download file" else "Download media",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colorScheme.onSurface
                     )
+                    val metaLine = listOfNotNull(
+                        domain,
+                        durationText,
+                        "${MediaSizeCalculator.formatFileSize(freeStorageBytes)} free"
+                    ).joinToString(" • ")
                     Text(
-                        text = "• Download: ${MediaSizeCalculator.formatFileSize(finalTotalBytes)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colorScheme.onSurfaceVariant
+                        text = metaLine,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                IconButton(
+                    onClick = {
+                        val directUrl = detectedMedia.directFileUrl ?: detectedMedia.pageUrl
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                        cm?.setPrimaryClip(ClipData.newPlainText("Stream URL", directUrl))
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        Toast.makeText(context, "Link copied", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Bolt,
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy link",
+                        tint = colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Filename Pill
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = colorScheme.surfaceContainer
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
                         contentDescription = null,
-                        tint = extendedColors.success,
-                        modifier = Modifier.size(13.dp)
+                        tint = colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
                     )
-                    Text(
-                        text = etaString,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = extendedColors.success,
-                        fontWeight = FontWeight.Bold
+
+                    BasicTextField(
+                        value = editableFileName,
+                        onValueChange = { editableFileName = it },
+                        modifier = Modifier.weight(1f),
+                        textStyle = TextStyle(
+                            color = colorScheme.onSurface,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        cursorBrush = SolidColor(colorScheme.primary),
+                        singleLine = true
                     )
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(emblemBgColor)
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = ".$finalExtension",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = emblemContentColor
+                        )
+                    }
+
+                    if (editableFileName.isNotBlank()) {
+                        Icon(
+                            imageVector = Icons.Default.Clear,
+                            contentDescription = "Clear",
+                            tint = colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clickable { editableFileName = "" }
+                        )
+                    }
                 }
             }
         }
 
+        // 2. DIRECT FILE SUMMARY OR VIDEO/AUDIO SELECTORS
         if (selectedMediaType == MediaType.DIRECT_FILE) {
-            Card(
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainer),
-                border = BorderStroke(1.dp, extendedColors.success.copy(alpha = 0.4f))
+                color = colorScheme.surfaceContainer
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(extendedColors.successContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = when (detectedExtension) {
-                                        "apk", "xapk", "apks" -> Icons.Default.Android
-                                        "zip", "rar", "7z", "tar", "gz", "bz2", "xz" -> Icons.Default.FolderZip
-                                        "pdf" -> Icons.Default.PictureAsPdf
-                                        else -> Icons.AutoMirrored.Filled.InsertDriveFile
-                                    },
-                                    contentDescription = null,
-                                    tint = extendedColors.onSuccessContainer,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Column {
-                                Text(
-                                    text = finalQualityLabel,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Native File Extension: .${detectedExtension.lowercase(Locale.ROOT)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(extendedColors.successContainer)
-                                .border(1.dp, extendedColors.success.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 9.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = detectedExtension.uppercase(Locale.ROOT),
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Black,
-                                color = extendedColors.onSuccessContainer
-                            )
-                        }
+                    Column {
+                        Text("File type", style = MaterialTheme.typography.bodySmall, color = colorScheme.onSurfaceVariant)
+                        Text(
+                            text = ".${detectedExtension.lowercase(Locale.ROOT)} • $finalQualityLabel",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = colorScheme.onSurface
+                        )
                     }
 
-                    HorizontalDivider(color = colorScheme.outlineVariant)
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text("Detected Size", style = MaterialTheme.typography.bodySmall, color = colorScheme.onSurfaceVariant)
-                            Text(
-                                text = if (finalTotalBytes > 0) MediaSizeCalculator.formatFileSize(finalTotalBytes) else "Server Stream (Dynamic)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = extendedColors.success
-                            )
-                        }
-
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("Download Protocol", style = MaterialTheme.typography.bodySmall, color = colorScheme.onSurfaceVariant)
-                            Text(
-                                text = "Multi-Socket Parallel ($selectedThreadCount Threads)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = colorScheme.onSurface
-                            )
-                        }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("Size", style = MaterialTheme.typography.bodySmall, color = colorScheme.onSurfaceVariant)
+                        Text(
+                            text = if (finalTotalBytes > 0) MediaSizeCalculator.formatFileSize(finalTotalBytes) else "Unknown",
+                            style = UdmTextStyles.TabularMetricSmall.copy(fontWeight = FontWeight.Bold),
+                            color = colorScheme.primary
+                        )
                     }
                 }
             }
         } else {
-            // 3. STAGE 1: MEDIA TYPE SELECTOR
+            // Media Type Segmented Pill
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(CircleShape)
+                    .background(colorScheme.surfaceContainer)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf(
+                    Triple(MediaType.VIDEO, "Video", Icons.Default.Movie),
+                    Triple(MediaType.AUDIO, "Audio only", Icons.Default.Audiotrack)
+                ).forEach { (type, label, icon) ->
+                    val selected = selectedMediaType == type
+                    Surface(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            selectedMediaType = type
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = CircleShape,
+                        color = if (selected) colorScheme.primaryContainer else Color.Transparent
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 9.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = if (selected) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                ),
+                                color = if (selected) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Quality Grid (2 columns)
+            val currentOptions = if (selectedMediaType == MediaType.VIDEO) videoQualityOptions else audioQualityOptions
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "1. Select Media Type",
+                    text = if (selectedMediaType == MediaType.VIDEO) "Resolution" else "Audio quality",
                     style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = colorScheme.primary
+                    color = colorScheme.onSurfaceVariant
                 )
 
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = colorScheme.surfaceContainer,
-                    border = BorderStroke(1.dp, colorScheme.outlineVariant)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        val isVideo = selectedMediaType == MediaType.VIDEO
-                        val videoSource = remember { MutableInteractionSource() }
-                        val isVideoPressed by videoSource.collectIsPressedAsState()
-                        val videoScale by animateFloatAsState(
-                            targetValue = if (isVideoPressed) 0.97f else 1f,
-                            animationSpec = spring(stiffness = 500f),
-                            label = "videoScale"
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .graphicsLayer {
-                                    scaleX = videoScale
-                                    scaleY = videoScale
-                                }
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isVideo) colorScheme.primaryContainer else Color.Transparent)
-                                .border(
-                                    width = if (isVideo) 1.5.dp else 0.dp,
-                                    color = if (isVideo) colorScheme.primary else Color.Transparent,
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                                .clickable(interactionSource = videoSource, indication = null) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    selectedMediaType = MediaType.VIDEO
-                                }
-                                .padding(vertical = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isVideo) Icons.Default.CheckCircle else Icons.Default.Movie,
-                                    contentDescription = null,
-                                    tint = if (isVideo) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "Video (with Audio)",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = if (isVideo) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isVideo) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        val isAudio = selectedMediaType == MediaType.AUDIO
-                        val audioSource = remember { MutableInteractionSource() }
-                        val isAudioPressed by audioSource.collectIsPressedAsState()
-                        val audioScale by animateFloatAsState(
-                            targetValue = if (isAudioPressed) 0.97f else 1f,
-                            animationSpec = spring(stiffness = 500f),
-                            label = "audioScale"
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .graphicsLayer {
-                                    scaleX = audioScale
-                                    scaleY = audioScale
-                                }
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isAudio) colorScheme.tertiaryContainer else Color.Transparent)
-                                .border(
-                                    width = if (isAudio) 1.5.dp else 0.dp,
-                                    color = if (isAudio) colorScheme.tertiary else Color.Transparent,
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                                .clickable(interactionSource = audioSource, indication = null) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    selectedMediaType = MediaType.AUDIO
-                                }
-                                .padding(vertical = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isAudio) Icons.Default.CheckCircle else Icons.Default.Audiotrack,
-                                    contentDescription = null,
-                                    tint = if (isAudio) colorScheme.onTertiaryContainer else colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "Audio Only",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = if (isAudio) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isAudio) colorScheme.onTertiaryContainer else colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 4. FAST PRESET QUICK-PICKS
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                PresetQuickPill(
-                    label = "Best Quality",
-                    icon = Icons.Default.HighQuality,
-                    accentColor = extendedColors.warning,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    if (selectedMediaType == MediaType.VIDEO) {
-                        val highest = videoQualityOptions.firstOrNull()?.height ?: 1080
-                        selectedHeight = highest
-                        selectedCodecName = "AV1"
-                    } else {
-                        selectedAudioTier = "master"
-                        selectedCodecName = "M4A"
-                    }
-                }
-
-                PresetQuickPill(
-                    label = "Balanced",
-                    icon = Icons.Default.Bolt,
-                    accentColor = colorScheme.primary,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    if (selectedMediaType == MediaType.VIDEO) {
-                        val balanced = videoQualityOptions.find { it.height in 720..1080 }?.height ?: 1080
-                        selectedHeight = balanced
-                        selectedCodecName = "H.264"
-                    } else {
-                        selectedAudioTier = "standard"
-                        selectedCodecName = "M4A"
-                    }
-                }
-
-                PresetQuickPill(
-                    label = "Data Saver",
-                    icon = Icons.Default.Storage,
-                    accentColor = extendedColors.success,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    if (selectedMediaType == MediaType.VIDEO) {
-                        val lowest = videoQualityOptions.lastOrNull()?.height ?: 480
-                        selectedHeight = lowest
-                        selectedCodecName = "AV1"
-                    } else {
-                        selectedAudioTier = "saver"
-                        selectedCodecName = "Opus"
-                    }
-                }
-            }
-
-            // 5. STAGE 2: RESOLUTION / AUDIO QUALITY SELECTION GRID
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (selectedMediaType == MediaType.VIDEO) "2. Select Resolution" else "2. Select Audio Quality",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = colorScheme.primary
-                    )
-
-                    Text(
-                        text = if (selectedMediaType == MediaType.VIDEO) "${videoQualityOptions.size} tiers available" else "Audiophile Grade",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colorScheme.onSurfaceVariant
-                    )
-                }
-
-                val currentOptions = if (selectedMediaType == MediaType.VIDEO) videoQualityOptions else audioQualityOptions
-
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    currentOptions.chunked(2).forEach { rowItems ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            rowItems.forEach { item ->
-                                val isSelected = if (selectedMediaType == MediaType.VIDEO) {
-                                    (selectedQuality?.height ?: -1) == item.height
-                                } else {
-                                    selectedQuality?.bitrateKbps == item.bitrateKbps
-                                }
-
-                                val cardSource = remember { MutableInteractionSource() }
-                                val isCardPressed by cardSource.collectIsPressedAsState()
-                                val cardScale by animateFloatAsState(
-                                    targetValue = if (isCardPressed) 0.96f else 1f,
-                                    animationSpec = spring(stiffness = 500f),
-                                    label = "cardScale"
-                                )
-
-                                Surface(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .graphicsLayer {
-                                            scaleX = cardScale
-                                            scaleY = cardScale
-                                        },
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = if (isSelected) colorScheme.primaryContainer.copy(alpha = 0.55f) else colorScheme.surfaceContainer,
-                                    border = BorderStroke(
-                                        width = if (isSelected) 1.5.dp else 1.dp,
-                                        color = if (isSelected) colorScheme.primary else colorScheme.outlineVariant
-                                    ),
-                                    onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        if (selectedMediaType == MediaType.VIDEO) {
-                                            selectedHeight = item.height
-                                        } else {
-                                            selectedAudioTier = when (item.bitrateKbps) {
-                                                320 -> "master"
-                                                256 -> "studio"
-                                                64 -> "saver"
-                                                else -> "standard"
-                                            }
-                                        }
-                                    },
-                                    interactionSource = cardSource
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(12.dp),
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = item.label,
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (isSelected) colorScheme.onPrimaryContainer else colorScheme.onSurface
-                                            )
-                                            if (isSelected) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(18.dp)
-                                                        .clip(CircleShape)
-                                                        .background(colorScheme.primary),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Check,
-                                                        contentDescription = "Selected",
-                                                        tint = colorScheme.onPrimary,
-                                                        modifier = Modifier.size(12.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        Text(
-                                            text = item.subLabel,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = if (isSelected) colorScheme.onPrimaryContainer.copy(alpha = 0.85f) else colorScheme.onSurfaceVariant
-                                        )
-
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(item.badgeColor.copy(alpha = 0.14f))
-                                                .border(
-                                                    width = 1.dp,
-                                                    color = item.badgeColor.copy(alpha = 0.45f),
-                                                    shape = RoundedCornerShape(6.dp)
-                                                )
-                                                .padding(horizontal = 7.dp, vertical = 2.5.dp)
-                                        ) {
-                                            Text(
-                                                text = item.badge,
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = item.badgeColor
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            if (rowItems.size == 1) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 6. STAGE 3: CODEC SELECTION
-            AnimatedVisibility(
-                visible = selectedQuality != null,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                currentOptions.chunked(2).forEach { rowItems ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = "3. Select Encoding Codec",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = colorScheme.primary
-                        )
-                        Text(
-                            text = "Hardware Optimized",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    val codecList = if (selectedMediaType == MediaType.VIDEO) videoCodecOptions else audioCodecOptions
-
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        codecList.forEach { codecOpt ->
-                            val isSelected = selectedCodec?.codecName == codecOpt.codecName
-                            val codecSource = remember { MutableInteractionSource() }
-                            val isCodecPressed by codecSource.collectIsPressedAsState()
-                            val codecScale by animateFloatAsState(
-                                targetValue = if (isCodecPressed) 0.98f else 1f,
-                                animationSpec = spring(stiffness = 500f),
-                                label = "codecScale"
-                            )
+                        rowItems.forEach { item ->
+                            val isSelected = if (selectedMediaType == MediaType.VIDEO) {
+                                (selectedQuality?.height ?: -1) == item.height
+                            } else {
+                                selectedQuality?.bitrateKbps == item.bitrateKbps
+                            }
 
                             Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .graphicsLayer {
-                                        scaleX = codecScale
-                                        scaleY = codecScale
-                                    },
-                                shape = RoundedCornerShape(16.dp),
-                                color = if (isSelected) codecOpt.accentColor.copy(alpha = 0.12f) else colorScheme.surfaceContainer,
-                                border = BorderStroke(
-                                    width = if (isSelected) 1.5.dp else 1.dp,
-                                    color = if (isSelected) codecOpt.accentColor else colorScheme.outlineVariant
-                                ),
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    selectedCodecName = codecOpt.codecName
+                                    if (selectedMediaType == MediaType.VIDEO) {
+                                        selectedHeight = item.height
+                                    } else {
+                                        selectedAudioTier = when (item.bitrateKbps) {
+                                            320 -> "master"
+                                            256 -> "studio"
+                                            64 -> "saver"
+                                            else -> "standard"
+                                        }
+                                    }
                                 },
-                                interactionSource = codecSource
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isSelected) colorScheme.primaryContainer else colorScheme.surfaceContainer
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        .padding(horizontal = 14.dp, vertical = 11.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(22.dp)
-                                                .clip(CircleShape)
-                                                .border(
-                                                    width = 2.dp,
-                                                    color = if (isSelected) codecOpt.accentColor else colorScheme.outline,
-                                                    shape = CircleShape
-                                                ),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (isSelected) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(10.dp)
-                                                        .clip(CircleShape)
-                                                        .background(codecOpt.accentColor)
-                                                )
-                                            }
-                                        }
-
-                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            Row(
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = codecOpt.codecName,
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    color = if (isSelected) codecOpt.accentColor else colorScheme.onSurface
-                                                )
-                                                Text(
-                                                    text = "(${codecOpt.tag})",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = colorScheme.onSurfaceVariant
-                                                )
-                                            }
-
-                                            Text(
-                                                text = codecOpt.badge,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(codecOpt.accentColor.copy(alpha = 0.14f))
-                                            .border(1.dp, codecOpt.accentColor.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                                            .padding(horizontal = 10.dp, vertical = 5.dp)
-                                    ) {
+                                    Column {
                                         Text(
-                                            text = codecOpt.sizeText,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = FontWeight.Bold,
-                                            color = codecOpt.accentColor
+                                            text = item.label,
+                                            style = MaterialTheme.typography.titleSmall.copy(
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                                            ),
+                                            color = if (isSelected) colorScheme.onPrimaryContainer else colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = item.sizeLabel,
+                                            style = UdmTextStyles.TabularMetricSmall,
+                                            color = if (isSelected) colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else colorScheme.onSurfaceVariant
                                         )
                                     }
+
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if (rowItems.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+
+            // Format / Codec 3-pill Row
+            if (selectedQuality != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Format",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colorScheme.onSurfaceVariant
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        activeCodecOptions.forEach { codecOpt ->
+                            val isSelected = selectedCodec?.codecName == codecOpt.codecName
+                            Surface(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedCodecName = codecOpt.codecName
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isSelected) colorScheme.secondaryContainer else colorScheme.surfaceContainer
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 9.dp, horizontal = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = codecOpt.codecName,
+                                        style = MaterialTheme.typography.labelLarge.copy(
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                        ),
+                                        color = if (isSelected) colorScheme.onSecondaryContainer else colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = codecOpt.sizeText,
+                                        style = UdmTextStyles.TabularMetricSmall.copy(fontSize = 11.sp),
+                                        color = if (isSelected) colorScheme.onSecondaryContainer.copy(alpha = 0.8f) else colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }
@@ -1452,113 +805,65 @@ fun DownloadConfigContent(
             }
         }
 
-        // 7. ADVANCED DOWNLOAD CONFIGURATION
-        Card(
+        // 3. COLLAPSED OPTIONS
+        Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainer),
-            border = BorderStroke(1.dp, colorScheme.outlineVariant)
+            color = colorScheme.surfaceContainer
         ) {
-            Column(modifier = Modifier.padding(14.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            isAdvancedExpanded = !isAdvancedExpanded
-                        },
+                        .clickable { isAdvancedExpanded = !isAdvancedExpanded },
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = Icons.Default.Tune,
                             contentDescription = null,
-                            tint = colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
+                            tint = colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
                         )
-                        Column {
-                            Text(
-                                text = "Advanced Download Options",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = colorScheme.onSurface
-                            )
-                            Text(
-                                text = "$selectedThreadCount Parallel Threads • ${if (isWifiOnly) "Wi-Fi Only" else "All Networks"}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(
+                            text = "Options • $selectedThreadCount connections${if (isWifiOnly) " • Wi-Fi" else ""}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colorScheme.onSurface
+                        )
                     }
 
-                    IconButton(onClick = { isAdvancedExpanded = !isAdvancedExpanded }) {
-                        Icon(
-                            imageVector = if (isAdvancedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = null,
-                            tint = colorScheme.primary
-                        )
-                    }
+                    Icon(
+                        imageVector = if (isAdvancedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = colorScheme.onSurfaceVariant
+                    )
                 }
 
-                AnimatedVisibility(visible = isAdvancedExpanded) {
+                AnimatedVisibility(
+                    visible = isAdvancedExpanded,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        HorizontalDivider(color = colorScheme.outlineVariant)
+                        HorizontalDivider(color = colorScheme.outlineVariant.copy(alpha = 0.4f))
 
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(colorScheme.primaryContainer),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Bolt,
-                                            contentDescription = null,
-                                            tint = colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                    }
-                                    Text(
-                                        text = "Multi-Socket Accelerator",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = colorScheme.onSurface
-                                    )
-                                }
-
-                                Text(
-                                    text = "$selectedThreadCount Turbo Sockets",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = colorScheme.primary
-                                )
+                                Text("Parallel connections", style = MaterialTheme.typography.bodySmall, color = colorScheme.onSurfaceVariant)
+                                Text("$selectedThreadCount", style = UdmTextStyles.TabularMetricSmall, color = colorScheme.primary)
                             }
-
-                            Text(
-                                text = "Splits download into concurrent parallel parts to bypass ISP single-stream throttles.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colorScheme.onSurfaceVariant
-                            )
-
                             Slider(
                                 value = selectedThreadCount.toFloat(),
                                 onValueChange = { selectedThreadCount = it.roundToInt() },
@@ -1567,98 +872,38 @@ fun DownloadConfigContent(
                             )
                         }
 
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = colorScheme.surfaceContainerLow,
-                            border = BorderStroke(1.dp, colorScheme.outlineVariant),
-                            modifier = Modifier.fillMaxWidth()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .padding(end = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(34.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(colorScheme.primaryContainer),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Wifi,
-                                            contentDescription = null,
-                                            tint = colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Download on Wi-Fi Only",
-                                            style = MaterialTheme.typography.bodyMedium.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                color = colorScheme.onSurface
-                                            )
-                                        )
-                                        Text(
-                                            text = "Wait for Wi-Fi connection to prevent cellular data charges",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                            Text("Wi-Fi only", style = MaterialTheme.typography.bodyMedium, color = colorScheme.onSurface)
+                            Switch(
+                                checked = isWifiOnly,
+                                onCheckedChange = {
+                                    isWifiOnly = it
+                                    appSettings.wifiOnlyDownloads = it
                                 }
-
-                                Switch(
-                                    checked = isWifiOnly,
-                                    onCheckedChange = {
-                                        isWifiOnly = it
-                                        appSettings.wifiOnlyDownloads = it
-                                    }
-                                )
-                            }
+                            )
                         }
 
                         OutlinedTextField(
                             value = destinationFolder,
                             onValueChange = { destinationFolder = it },
-                            label = { Text("Save Destination Directory") },
+                            label = { Text("Save folder") },
                             leadingIcon = {
-                                Icon(Icons.Default.Folder, contentDescription = null, tint = colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
                             },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = colorScheme.primary,
-                                unfocusedBorderColor = colorScheme.outlineVariant,
-                                focusedTextColor = colorScheme.onSurface,
-                                unfocusedTextColor = colorScheme.onSurface,
-                                focusedContainerColor = colorScheme.surface,
-                                unfocusedContainerColor = colorScheme.surface
-                            )
+                            shape = RoundedCornerShape(12.dp)
                         )
                     }
                 }
             }
         }
 
-        // 8. PRIMARY ACTION CTA BUTTON
-        val buttonSource = remember { MutableInteractionSource() }
-        val isButtonPressed by buttonSource.collectIsPressedAsState()
-        val buttonScale by animateFloatAsState(
-            targetValue = if (isButtonPressed) 0.97f else 1f,
-            animationSpec = spring(stiffness = 500f),
-            label = "buttonScale"
-        )
+        // 4. DOWNLOAD CTA
         val ctaContainerColor = if (selectedMediaType == MediaType.DIRECT_FILE) extendedColors.success else colorScheme.primary
         val ctaContentColor = if (selectedMediaType == MediaType.DIRECT_FILE) extendedColors.onSuccess else colorScheme.onPrimary
 
@@ -1681,7 +926,7 @@ fun DownloadConfigContent(
                 }
 
                 if (downloadUrl == null) {
-                    Toast.makeText(context, "No stream URL found for download", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "No download URL found", Toast.LENGTH_SHORT).show()
                     return@Button
                 }
 
@@ -1711,15 +956,10 @@ fun DownloadConfigContent(
                 )
                 onDismiss()
             },
-            interactionSource = buttonSource,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
-                .graphicsLayer {
-                    scaleX = buttonScale
-                    scaleY = buttonScale
-                },
-            shape = RoundedCornerShape(16.dp),
+                .height(52.dp),
+            shape = CircleShape,
             colors = ButtonDefaults.buttonColors(
                 containerColor = ctaContainerColor,
                 contentColor = ctaContentColor
@@ -1728,75 +968,22 @@ fun DownloadConfigContent(
             Icon(
                 imageVector = Icons.Default.Download,
                 contentDescription = null,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(19.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = if (selectedMediaType == MediaType.DIRECT_FILE) {
-                    "Download ${detectedExtension.uppercase(Locale.ROOT)} (${if (finalTotalBytes > 0) MediaSizeCalculator.formatFileSize(finalTotalBytes) else "Direct File"})"
+                    if (finalTotalBytes > 0) "Download (${MediaSizeCalculator.formatFileSize(finalTotalBytes)})" else "Download"
                 } else {
-                    "Download $finalQualityLabel • $finalCodecName (${MediaSizeCalculator.formatFileSize(finalTotalBytes)})"
+                    "Download $finalQualityLabel (${MediaSizeCalculator.formatFileSize(finalTotalBytes)})"
                 },
-                style = MaterialTheme.typography.titleSmall.copy(
-                    fontWeight = FontWeight.ExtraBold
-                ),
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
 
-        Spacer(modifier = Modifier.height(28.dp))
-    }
-}
-
-@Composable
-private fun PresetQuickPill(
-    label: String,
-    icon: ImageVector,
-    accentColor: Color,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val colorScheme = MaterialTheme.colorScheme
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.94f else 1f,
-        animationSpec = spring(stiffness = 500f),
-        label = "pillScale"
-    )
-
-    Surface(
-        modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            },
-        shape = RoundedCornerShape(12.dp),
-        color = colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.4f)),
-        onClick = onClick,
-        interactionSource = interactionSource
-    ) {
-        Row(
-            modifier = Modifier.padding(vertical = 7.dp, horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = accentColor,
-                modifier = Modifier.size(14.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text = label,
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = colorScheme.onSurface
-            )
-        }
+        Spacer(modifier = Modifier.height(20.dp))
     }
 }
 
@@ -1804,52 +991,16 @@ private fun PresetQuickPill(
 @Composable
 fun DownloadConfigBottomSheetLightPreview() {
     val sampleDetected = DetectedPageMedia(
-        pageTitle = "Gemini 4 Carbon Is Here _Fully Test",
+        pageTitle = "Sample 4K Video",
         pageUrl = "https://m.youtube.com/watch?v=sample",
         thumbnailUrl = null,
         durationSeconds = 1066,
         videoVariants = listOf(
-            StreamVariant(
-                formatId = "av01_4k",
-                url = "https://example.com/video_4k.mp4",
-                mediaType = MediaType.VIDEO,
-                qualityLabel = "2160p 4K",
-                resolutionHeight = 2160,
-                bitrateKbps = 15000,
-                videoCodec = VideoCodec.AV1,
-                audioCodec = null,
-                containerExt = "mp4",
-                fileSizeBytes = 2810000000L,
-                requiresAudioMerge = true
-            ),
-            StreamVariant(
-                formatId = "avc1_1080p",
-                url = "https://example.com/video_1080p.mp4",
-                mediaType = MediaType.VIDEO,
-                qualityLabel = "1080p FHD",
-                resolutionHeight = 1080,
-                bitrateKbps = 4500,
-                videoCodec = VideoCodec.H264,
-                audioCodec = null,
-                containerExt = "mp4",
-                fileSizeBytes = 815000000L,
-                requiresAudioMerge = true
-            )
+            StreamVariant("av01_4k", "https://example.com/v4k.mp4", MediaType.VIDEO, "2160p 4K", 2160, 15000, VideoCodec.AV1, null, "mp4", 2810000000L, true),
+            StreamVariant("avc1_1080p", "https://example.com/v1080.mp4", MediaType.VIDEO, "1080p", 1080, 4500, VideoCodec.H264, null, "mp4", 815000000L, true)
         ),
         audioVariants = listOf(
-            StreamVariant(
-                formatId = "m4a_audio",
-                url = "https://example.com/audio.m4a",
-                mediaType = MediaType.AUDIO,
-                qualityLabel = "256 kbps",
-                resolutionHeight = 0,
-                bitrateKbps = 256,
-                videoCodec = null,
-                audioCodec = AudioCodec.M4A,
-                containerExt = "m4a",
-                fileSizeBytes = 32500000L,
-                requiresAudioMerge = false
-            )
+            StreamVariant("m4a_audio", "https://example.com/a.m4a", MediaType.AUDIO, "256 kbps", 0, 256, null, AudioCodec.M4A, "m4a", 32500000L, false)
         )
     )
 
@@ -1868,24 +1019,12 @@ fun DownloadConfigBottomSheetLightPreview() {
 @Composable
 fun DownloadConfigBottomSheetDarkPreview() {
     val sampleDetected = DetectedPageMedia(
-        pageTitle = "Gemini 4 Carbon Is Here _Fully Test",
+        pageTitle = "Sample 4K Video",
         pageUrl = "https://m.youtube.com/watch?v=sample",
         thumbnailUrl = null,
         durationSeconds = 1066,
         videoVariants = listOf(
-            StreamVariant(
-                formatId = "av01_4k",
-                url = "https://example.com/video_4k.mp4",
-                mediaType = MediaType.VIDEO,
-                qualityLabel = "2160p 4K",
-                resolutionHeight = 2160,
-                bitrateKbps = 15000,
-                videoCodec = VideoCodec.AV1,
-                audioCodec = null,
-                containerExt = "mp4",
-                fileSizeBytes = 2810000000L,
-                requiresAudioMerge = true
-            )
+            StreamVariant("av01_4k", "https://example.com/v4k.mp4", MediaType.VIDEO, "2160p 4K", 2160, 15000, VideoCodec.AV1, null, "mp4", 2810000000L, true)
         ),
         audioVariants = emptyList()
     )

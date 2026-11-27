@@ -131,16 +131,34 @@ private val UdmDarkColorScheme = darkColorScheme(
 fun UDMTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = true,
+    pitchBlack: Boolean = false,
     configureSystemBars: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val colorScheme = when {
+    val baseColorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
         darkTheme -> UdmDarkColorScheme
         else -> UdmLightColorScheme
+    }
+
+    val colorScheme = if (darkTheme && pitchBlack) {
+        baseColorScheme.copy(
+            background = Color.Black,
+            surface = Color.Black,
+            surfaceDim = Color.Black,
+            surfaceBright = Color(0xFF141414),
+            surfaceContainerLowest = Color.Black,
+            surfaceContainerLow = Color(0xFF0A0A0A),
+            surfaceContainer = Color(0xFF111111),
+            surfaceContainerHigh = Color(0xFF181818),
+            surfaceContainerHighest = Color(0xFF202020),
+            surfaceVariant = Color(0xFF161616)
+        )
+    } else {
+        baseColorScheme
     }
 
     val extendedColors = if (darkTheme) DarkExtendedColors else LightExtendedColors

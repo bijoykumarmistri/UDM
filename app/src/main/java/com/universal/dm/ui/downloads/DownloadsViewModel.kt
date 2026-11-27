@@ -123,6 +123,12 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun clearCompletedTasks() {
+        viewModelScope.launch(Dispatchers.IO) {
+            downloadDao.deleteCompletedTasks()
+        }
+    }
+
     fun cancelAll() {
         viewModelScope.launch {
             activeTasks.value.forEach { task ->

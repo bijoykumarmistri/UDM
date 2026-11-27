@@ -62,17 +62,25 @@ class UdmApplication : Application() {
                                 }"
                             )
                             appScope.launch {
-                                runCatching {
-                                    val status = YoutubeDL.getInstance().updateYoutubeDL(
-                                        appContext,
-                                        YoutubeDL.UpdateChannel.NIGHTLY
-                                    )
-                                    Log.d(
-                                        TAG,
-                                        "Background yt-dlp update status: $status, version: ${
-                                            runCatching { YoutubeDL.getInstance().version(appContext) }.getOrNull()
-                                        }"
-                                    )
+                                val prefs = appContext.getSharedPreferences("udm_app_settings", MODE_PRIVATE)
+                                val now = System.currentTimeMillis()
+                                val lastCheck = prefs.getLong("key_last_ytdlp_update_check_ms", 0L)
+                                val oneDayMs = 24L * 60L * 60L * 1000L
+                                if (now - lastCheck >= oneDayMs) {
+                                    kotlinx.coroutines.delay(8_000L)
+                                    runCatching {
+                                        val status = YoutubeDL.getInstance().updateYoutubeDL(
+                                            appContext,
+                                            YoutubeDL.UpdateChannel.NIGHTLY
+                                        )
+                                        prefs.edit().putLong("key_last_ytdlp_update_check_ms", System.currentTimeMillis()).apply()
+                                        Log.d(
+                                            TAG,
+                                            "Background yt-dlp update status: $status, version: ${
+                                                runCatching { YoutubeDL.getInstance().version(appContext) }.getOrNull()
+                                            }"
+                                        )
+                                    }
                                 }
                             }
                         } catch (e: Exception) {

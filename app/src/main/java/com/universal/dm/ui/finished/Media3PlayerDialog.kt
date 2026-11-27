@@ -17,8 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
+import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -67,16 +68,16 @@ fun Media3PlayerDialog(
         ExoPlayer.Builder(context).build().apply {
             val uri = runCatching {
                 if (task.filePath.startsWith("content://")) {
-                    Uri.parse(task.filePath)
+                    task.filePath.toUri()
                 } else {
                     val file = File(task.filePath)
                     if (file.exists()) {
                         Uri.fromFile(file)
                     } else {
-                        Uri.parse(task.downloadUrl)
+                        task.downloadUrl.toUri()
                     }
                 }
-            }.getOrDefault(Uri.parse(task.downloadUrl))
+            }.getOrDefault(task.downloadUrl.toUri())
 
             setMediaItem(MediaItem.fromUri(uri))
             prepare()
@@ -246,7 +247,7 @@ fun Media3PlayerDialog(
                     modifier = Modifier.weight(1f),
                     shape = MaterialTheme.shapes.medium
                 ) {
-                    Icon(imageVector = Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(imageVector = Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Open App")
                 }

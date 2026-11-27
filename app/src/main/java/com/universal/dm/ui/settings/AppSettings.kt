@@ -12,7 +12,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Persistent Application Settings backed by SharedPreferences.
- * Ensures settings like thread count, theme, ad-blocker, and download folder
+ * Ensures settings like thread count, pitch black mode, ad-blocker, and download folder
  * are saved across app restarts and process recreation.
  */
 class AppSettingsState(private val context: Context? = null) {
@@ -25,7 +25,7 @@ class AppSettingsState(private val context: Context? = null) {
     var isDnsFilterEnabled by mutableStateOf(prefs?.getBoolean(KEY_DNS_FILTER, true) ?: true)
     var blockPopupsAndRedirects by mutableStateOf(prefs?.getBoolean(KEY_BLOCK_POPUPS, true) ?: true)
     var wifiOnlyDownloads by mutableStateOf(prefs?.getBoolean(KEY_WIFI_ONLY, false) ?: false)
-    var isDynamicColorEnabled by mutableStateOf(prefs?.getBoolean(KEY_DYNAMIC_COLOR, true) ?: true)
+    var isPitchBlackEnabled by mutableStateOf(prefs?.getBoolean(KEY_PITCH_BLACK, false) ?: false)
     var defaultSearchEngineName by mutableStateOf(prefs?.getString(KEY_SEARCH_ENGINE, "DUCKDUCKGO") ?: "DUCKDUCKGO")
     var soundOnCompletion by mutableStateOf(prefs?.getBoolean(KEY_SOUND_COMPLETION, true) ?: true)
     var autoResumeOnWifi by mutableStateOf(prefs?.getBoolean(KEY_AUTO_RESUME_WIFI, true) ?: true)
@@ -77,9 +77,9 @@ class AppSettingsState(private val context: Context? = null) {
         }
     }
 
-    fun updateDynamicColor(enabled: Boolean) {
-        isDynamicColorEnabled = enabled
-        prefs?.edit()?.putBoolean(KEY_DYNAMIC_COLOR, enabled)?.apply()
+    fun updatePitchBlack(enabled: Boolean) {
+        isPitchBlackEnabled = enabled
+        prefs?.edit()?.putBoolean(KEY_PITCH_BLACK, enabled)?.apply()
     }
 
     fun updateAutoSniffer(enabled: Boolean = true) {
@@ -110,7 +110,7 @@ class AppSettingsState(private val context: Context? = null) {
         private const val KEY_DNS_FILTER = "key_dns_filter"
         private const val KEY_BLOCK_POPUPS = "key_block_popups"
         private const val KEY_WIFI_ONLY = "key_wifi_only"
-        private const val KEY_DYNAMIC_COLOR = "key_dynamic_color"
+        private const val KEY_PITCH_BLACK = "key_pitch_black"
         const val KEY_SEARCH_ENGINE = "key_search_engine"
         private const val KEY_SOUND_COMPLETION = "key_sound_completion"
         private const val KEY_AUTO_RESUME_WIFI = "key_auto_resume_wifi"

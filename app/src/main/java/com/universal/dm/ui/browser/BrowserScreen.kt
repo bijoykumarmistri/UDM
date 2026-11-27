@@ -1,53 +1,46 @@
 package com.universal.dm.ui.browser
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.ViewGroup
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.FastOutLinearInEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,9 +53,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -72,52 +62,58 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FindInPage
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Javascript
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Tab
 import androidx.compose.material.icons.filled.VpnLock
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -129,15 +125,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalInspectionMode
@@ -150,14 +144,37 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.net.toUri
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.universal.dm.domain.adblock.AdBlockerEngine
 import com.universal.dm.domain.downloader.DownloadManager
 import com.universal.dm.domain.sniffer.MediaSniffer
+import com.universal.dm.ui.components.UdmHeaderActionButton
+import com.universal.dm.ui.components.UdmIconSquircle
 import com.universal.dm.ui.settings.LocalAppSettings
 import com.universal.dm.ui.theme.UDMTheme
 import com.universal.dm.ui.theme.UdmTheme
 import kotlinx.coroutines.launch
+import java.net.URI
+
+private const val LEGACY_FORCE_DARK_CSS_JS = """
+    (function() {
+        var id = 'udm-force-dark-style';
+        var existing = document.getElementById(id);
+        if (!existing) {
+            var style = document.createElement('style');
+            style.id = id;
+            style.textContent = 'html { filter: invert(0.92) hue-rotate(180deg) !important; background: #121212 !important; } img, video, picture, canvas, svg, [style*="background-image"] { filter: invert(1) hue-rotate(180deg) !important; }';
+            (document.head || document.documentElement).appendChild(style);
+        }
+    })();
+"""
+
+private class AppliedWebSettingsTracker(
+    var desktopMode: Boolean,
+    var jsEnabled: Boolean,
+    var forceDark: Boolean
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -169,7 +186,7 @@ fun BrowserScreen(
 ) {
     if (LocalInspectionMode.current) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Browser & Media Sniffer Preview", style = MaterialTheme.typography.titleMedium)
+            Text("Browser Preview", style = MaterialTheme.typography.titleMedium)
         }
     } else {
         val vm: BrowserViewModel = viewModel()
@@ -209,9 +226,24 @@ private fun BrowserScreenContent(
         }
     }
 
-    // Smart back navigation that escapes redirect loops (e.g. Vimeo) and returns home smoothly
+    LaunchedEffect(uiState.findQuery, uiState.isFindInPageVisible, webViewInstance) {
+        val wv = webViewInstance ?: return@LaunchedEffect
+        if (!uiState.isFindInPageVisible || uiState.findQuery.isBlank()) {
+            wv.clearMatches()
+        } else {
+            wv.findAllAsync(uiState.findQuery)
+        }
+    }
+
     val handleSmartBackNavigation: () -> Unit = {
         when {
+            uiState.isFindInPageVisible -> {
+                webViewInstance?.clearMatches()
+                viewModel.setFindInPageVisible(false)
+            }
+            uiState.isHistorySheetOpen -> {
+                viewModel.setHistorySheetOpen(false)
+            }
             uiState.isTabSwitcherOpen -> {
                 viewModel.dismissTabSwitcher()
             }
@@ -228,13 +260,11 @@ private fun BrowserScreenContent(
                     } else if (curIndex == 1) {
                         val curItem = history.getItemAtIndex(curIndex)
                         val prevItem = history.getItemAtIndex(0)
-                        val curHost = curItem?.url?.let { runCatching { java.net.URI(it).host?.removePrefix("www.") }.getOrNull() }
-                        val prevHost = prevItem?.url?.let { runCatching { java.net.URI(it).host?.removePrefix("www.") }.getOrNull() }
+                        val curHost = curItem?.url?.let { runCatching { URI(it).host?.removePrefix("www.") }.getOrNull() }
+                        val prevHost = prevItem?.url?.let { runCatching { URI(it).host?.removePrefix("www.") }.getOrNull() }
                         val prevUrl = prevItem?.url ?: ""
 
                         if (curHost == prevHost || prevUrl.contains("vimeo.com", ignoreCase = true)) {
-                            // User originally opened Vimeo from home, and it redirected to index 1.
-                            // Going back should directly return to Home dashboard!
                             webView.stopLoading()
                             webView.clearHistory()
                             webViewInstance = null
@@ -243,15 +273,14 @@ private fun BrowserScreenContent(
                             webView.goBack()
                         }
                     } else {
-                        // Check if previous item was an auto-redirect
                         val curItem = history.getItemAtIndex(curIndex)
                         val prevItem = history.getItemAtIndex(curIndex - 1)
-                        val curHost = curItem?.url?.let { runCatching { java.net.URI(it).host?.removePrefix("www.") }.getOrNull() }
-                        val prevHost = prevItem?.url?.let { runCatching { java.net.URI(it).host?.removePrefix("www.") }.getOrNull() }
+                        val curHost = curItem?.url?.let { runCatching { URI(it).host?.removePrefix("www.") }.getOrNull() }
+                        val prevHost = prevItem?.url?.let { runCatching { URI(it).host?.removePrefix("www.") }.getOrNull() }
 
                         if (curHost != null && curHost == prevHost && curIndex >= 2) {
                             val prevPrevItem = history.getItemAtIndex(curIndex - 2)
-                            val prevPrevHost = prevPrevItem?.url?.let { runCatching { java.net.URI(it).host?.removePrefix("www.") }.getOrNull() }
+                            val prevPrevHost = prevPrevItem?.url?.let { runCatching { URI(it).host?.removePrefix("www.") }.getOrNull() }
                             if (prevPrevHost != curHost) {
                                 webView.goBackOrForward(-2)
                             } else {
@@ -280,16 +309,84 @@ private fun BrowserScreenContent(
         viewModel.clearToHome()
     }
 
-    // Intercept back presses in WebView
-    BackHandler(enabled = uiState.currentLoadedUrl != null || uiState.isTabSwitcherOpen) {
+    val handleClearSiteData: () -> Unit = {
+        webViewInstance?.clearCache(true)
+        runCatching { CookieManager.getInstance().removeAllCookies(null) }
+        runCatching { CookieManager.getInstance().flush() }
+        runCatching { WebStorage.getInstance().deleteAllData() }
+        viewModel.dismissMenu()
+        scope.launch {
+            snackbarHostState.showSnackbar("Cache & cookies cleared")
+        }
+    }
+
+    val handleCopyCurrentUrl: () -> Unit = {
+        val url = uiState.currentLoadedUrl
+        if (!url.isNullOrBlank()) {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cm?.setPrimaryClip(ClipData.newPlainText("URL", url))
+            scope.launch {
+                snackbarHostState.showSnackbar("Link copied")
+            }
+        }
+        viewModel.dismissMenu()
+    }
+
+    val handleShareCurrentUrl: () -> Unit = {
+        val url = uiState.currentLoadedUrl
+        if (!url.isNullOrBlank()) {
+            val sendIntent = Intent().apply {
+                action = Intent.ACTION_SEND
+                putExtra(Intent.EXTRA_TEXT, url)
+                type = "text/plain"
+            }
+            context.startActivity(Intent.createChooser(sendIntent, "Share Link"))
+        }
+        viewModel.dismissMenu()
+    }
+
+    val handleOpenExternalBrowser: () -> Unit = {
+        val url = uiState.currentLoadedUrl
+        if (!url.isNullOrBlank()) {
+            runCatching {
+                val intent = Intent(Intent.ACTION_VIEW, url.toUri()).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            }
+        }
+        viewModel.dismissMenu()
+    }
+
+    val handlePinCurrentOrOpenDialog: () -> Unit = {
+        val pageUrl = uiState.currentLoadedUrl
+        if (!pageUrl.isNullOrBlank()) {
+            viewModel.pinFavourite(
+                title = uiState.pageTitle ?: "Bookmark",
+                url = pageUrl,
+                badge = "Site"
+            )
+            scope.launch {
+                snackbarHostState.showSnackbar("Added to bookmarks")
+            }
+        } else {
+            viewModel.setPinSiteDialogVisible(true)
+        }
+        viewModel.dismissMenu()
+    }
+
+    BackHandler(
+        enabled = uiState.currentLoadedUrl != null ||
+            uiState.isTabSwitcherOpen ||
+            uiState.isHistorySheetOpen ||
+            uiState.isFindInPageVisible
+    ) {
         handleSmartBackNavigation()
     }
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-
-            // 1. Sleek Apple-Grade Glassmorphic Omnibar
-            AppleOmnibar(
+            BrowserTopBar(
                 uiState = uiState,
                 appSettingsAdBlocker = appSettings.isAdBlockerEnabled,
                 onAdBlockerToggle = {
@@ -303,24 +400,27 @@ private fun BrowserScreenContent(
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     handleSmartBackNavigation()
                 },
+                onForward = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    webViewInstance?.goForward()
+                    viewModel.dismissMenu()
+                },
                 onHome = {
                     handleHomeNavigation()
+                    viewModel.dismissMenu()
                 },
-                onPinCurrentPage = {
-                    uiState.currentLoadedUrl?.let { pageUrl ->
-                        viewModel.pinFavourite(
-                            title = uiState.pageTitle ?: "Pinned Site",
-                            url = pageUrl,
-                            badge = "Pinned"
-                        )
-                        scope.launch {
-                            snackbarHostState.showSnackbar("Pinned to Favourite!")
-                        }
-                    }
-                },
+                onPinCurrentPage = handlePinCurrentOrOpenDialog,
                 onOpenSearchEngineDialog = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     viewModel.setSearchEngineDialogVisible(true)
+                },
+                onOpenPageInfo = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    viewModel.setPageInfoDialogVisible(true)
+                },
+                onOpenHistory = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    viewModel.setHistorySheetOpen(true)
                 },
                 onToggleTabs = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -339,29 +439,36 @@ private fun BrowserScreenContent(
                     viewModel.setIncognitoMode(!uiState.isIncognito)
                     viewModel.dismissMenu()
                 },
-                onToggleDesktopMode = { viewModel.toggleDesktopMode() },
-                onToggleJavaScript = { viewModel.toggleJavaScript() },
-                onShare = {
-                    val url = uiState.currentLoadedUrl
-                    if (!url.isNullOrBlank()) {
-                        val sendIntent = Intent().apply {
-                            action = Intent.ACTION_SEND
-                            putExtra(Intent.EXTRA_TEXT, url)
-                            type = "text/plain"
-                        }
-                        context.startActivity(Intent.createChooser(sendIntent, "Share Link"))
+                onReopenClosedTab = {
+                    if (viewModel.reopenLastClosedTab()) {
+                        scope.launch { snackbarHostState.showSnackbar("Restored closed tab") }
                     }
-                    viewModel.dismissMenu()
                 },
-                onReload = {
-                    webViewInstance?.reload()
+                onToggleDesktopMode = { viewModel.toggleDesktopMode() },
+                onToggleForceDark = { viewModel.toggleForceDarkWebPages() },
+                onOpenFindInPage = { viewModel.setFindInPageVisible(true) },
+                onFindQueryChanged = { viewModel.onFindQueryChanged(it) },
+                onFindNext = { forward -> webViewInstance?.findNext(forward) },
+                onCloseFindInPage = {
+                    webViewInstance?.clearMatches()
+                    viewModel.setFindInPageVisible(false)
+                },
+                onCopyUrl = handleCopyCurrentUrl,
+                onShare = handleShareCurrentUrl,
+                onOpenExternalBrowser = handleOpenExternalBrowser,
+                onClearSiteData = handleClearSiteData,
+                onReloadOrStop = {
+                    if (uiState.isLoading) {
+                        webViewInstance?.stopLoading()
+                    } else {
+                        webViewInstance?.reload()
+                    }
                     viewModel.dismissMenu()
                 },
                 onManualSniff = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     val currentUrl = webViewInstance?.url ?: uiState.currentLoadedUrl
                     val currentTitle = webViewInstance?.title ?: uiState.pageTitle
-                    android.util.Log.d("BrowserScreen", "onManualSniff invoked: currentUrl=$currentUrl, loadedUrl=${uiState.currentLoadedUrl}, detectedMedia=${uiState.detectedMediaState != null}")
                     if (uiState.detectedMediaState != null) {
                         viewModel.showBottomSheet()
                     } else {
@@ -373,22 +480,10 @@ private fun BrowserScreenContent(
                 }
             )
 
-            // 2. Viewport: Dashboard vs WebView with smooth Fade & Scale settle transition
             AnimatedContent(
                 targetState = uiState.currentLoadedUrl == null,
                 transitionSpec = {
-                    val viewportEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
-                    (fadeIn(
-                        animationSpec = tween(durationMillis = 220, easing = LinearOutSlowInEasing)
-                    ) + scaleIn(
-                        initialScale = 0.985f,
-                        animationSpec = tween(durationMillis = 220, easing = viewportEasing)
-                    )) togetherWith (fadeOut(
-                        animationSpec = tween(durationMillis = 150, easing = FastOutLinearInEasing)
-                    ) + scaleOut(
-                        targetScale = 0.985f,
-                        animationSpec = tween(durationMillis = 150, easing = FastOutLinearInEasing)
-                    ))
+                    fadeIn(tween(180)) togetherWith fadeOut(tween(140))
                 },
                 label = "BrowserViewportTransition",
                 modifier = Modifier
@@ -397,276 +492,316 @@ private fun BrowserScreenContent(
             ) { isHome ->
                 if (isHome) {
                     BrowserHomeDashboard(
-                    isIncognito = uiState.isIncognito,
-                    selectedSearchEngine = uiState.selectedSearchEngine,
-                    favourites = uiState.favourites,
-                    onSearchEngineClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        viewModel.setSearchEngineDialogVisible(true)
-                    },
-                    onBookmarkClicked = { url ->
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        viewModel.loadUrl(url)
-                    },
-                    onPasteAndDownload = { pasteUrl ->
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.onUrlInputChanged(pasteUrl)
-                        viewModel.loadUrl(pasteUrl)
-                    },
-                    onPinSiteClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        viewModel.setPinSiteDialogVisible(true)
-                    },
-                    onRemoveFavourite = { site ->
-                        favouriteToRemove = site
+                        isIncognito = uiState.isIncognito,
+                        selectedSearchEngine = uiState.selectedSearchEngine,
+                        favourites = uiState.favourites,
+                        onSearchEngineClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            viewModel.setSearchEngineDialogVisible(true)
+                        },
+                        onBookmarkClicked = { url ->
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            viewModel.loadUrl(url)
+                        },
+                        onPasteAndDownload = { pasteUrl ->
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.onUrlInputChanged(pasteUrl)
+                            viewModel.loadUrl(pasteUrl)
+                        },
+                        onPinSiteClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            viewModel.setPinSiteDialogVisible(true)
+                        },
+                        onRemoveFavourite = { site ->
+                            favouriteToRemove = site
+                        }
+                    )
+                } else {
+                    var lastLoadedProgrammaticUrl by remember { mutableStateOf<String?>(null) }
+                    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+                    val appliedTracker = remember {
+                        AppliedWebSettingsTracker(
+                            desktopMode = uiState.isDesktopMode,
+                            jsEnabled = uiState.isJavaScriptEnabled,
+                            forceDark = uiState.isForceDarkWebPages
+                        )
                     }
-                )
-            } else {
-                // Programmatic URL tracking to prevent in-page navigations (YouTube clicks) from rolling back
-                var lastLoadedProgrammaticUrl by remember { mutableStateOf<String?>(null) }
-                val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
 
-                            @SuppressLint("SetJavaScriptEnabled")
-                            settings.javaScriptEnabled = uiState.isJavaScriptEnabled
-                            settings.domStorageEnabled = true
-                            settings.databaseEnabled = true
-                            settings.mediaPlaybackRequiresUserGesture = false
-                            settings.loadWithOverviewMode = uiState.isDesktopMode
-                            settings.useWideViewPort = true
-                            settings.textZoom = 100
-                            settings.setSupportMultipleWindows(true)
-                            settings.javaScriptCanOpenWindowsAutomatically = false
-                            settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                                @SuppressLint("SetJavaScriptEnabled")
+                                settings.javaScriptEnabled = uiState.isJavaScriptEnabled
+                                settings.domStorageEnabled = true
+                                settings.mediaPlaybackRequiresUserGesture = false
+                                settings.loadWithOverviewMode = uiState.isDesktopMode
+                                settings.useWideViewPort = true
+                                settings.textZoom = uiState.textZoom
+                                settings.setSupportZoom(true)
+                                settings.builtInZoomControls = true
+                                settings.displayZoomControls = false
+                                settings.setSupportMultipleWindows(true)
+                                settings.javaScriptCanOpenWindowsAutomatically = false
+                                settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
 
-                            if (uiState.isDesktopMode) {
-                                settings.userAgentString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                            }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    settings.isAlgorithmicDarkeningAllowed = uiState.isForceDarkWebPages
+                                }
 
-                            if (uiState.isIncognito) {
-                                settings.cacheMode = WebSettings.LOAD_NO_CACHE
-                                clearHistory()
-                                clearCache(true)
-                            }
+                                if (uiState.isDesktopMode) {
+                                    settings.userAgentString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                                }
 
-                            // Add Javascript Interface for HTML5 video/audio DOM sniffing & SPA navigation
-                            addJavascriptInterface(object {
-                                @JavascriptInterface
-                                fun onMediaFound(mediaUrl: String) {
-                                    android.util.Log.d("BrowserScreen", "JS onMediaFound: $mediaUrl")
-                                    val currentMedia = viewModel.uiState.value.detectedMediaState
-                                    val isChunkOrBlob = mediaUrl.startsWith("blob:") || mediaUrl.contains("videoplayback")
-                                    if (currentMedia == null && !isChunkOrBlob) {
-                                        mainHandler.post {
-                                            viewModel.triggerMediaExtraction(mediaUrl, viewModel.uiState.value.pageTitle, autoShowBottomSheet = false)
-                                        }
+                                if (uiState.isIncognito) {
+                                    settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                                    clearHistory()
+                                    clearCache(true)
+                                }
+
+                                setFindListener { activeMatchOrdinal, numberOfMatches, isDoneCounting ->
+                                    if (isDoneCounting) {
+                                        viewModel.onFindResultsUpdated(activeMatchOrdinal, numberOfMatches)
                                     }
                                 }
 
-                                @JavascriptInterface
-                                fun onUrlChanged(newUrl: String) {
-                                    android.util.Log.d("BrowserScreen", "JS onUrlChanged: $newUrl")
-                                    mainHandler.post {
-                                        lastLoadedProgrammaticUrl = newUrl
-                                        viewModel.onPageStarted(newUrl, isAutoSniffEnabled = true)
-                                    }
-                                }
-                            }, "UdmMediaBridge")
-
-                            // Intercept standard downloads (e.g. .zip, .apk, .mp4)
-                            setDownloadListener { url, _, _, _, _ ->
-                                mainHandler.post {
-                                    viewModel.triggerMediaExtraction(url, title)
-                                    viewModel.showBottomSheet()
-                                }
-                            }
-
-                            webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(
-                                    view: WebView?,
-                                    request: WebResourceRequest?
-                                ): Boolean {
-                                    val targetUrl = request?.url?.toString() ?: return false
-                                    if (targetUrl.startsWith("http://", ignoreCase = true) ||
-                                        targetUrl.startsWith("https://", ignoreCase = true)
-                                    ) {
-                                        return false
-                                    }
-                                    if (appSettings.blockPopupsAndRedirects && request?.hasGesture() == false) {
-                                        return true
-                                    }
-                                    return runCatching {
-                                        val intent = Intent(Intent.ACTION_VIEW, request?.url).apply {
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                        ctx.startActivity(intent)
-                                        true
-                                    }.getOrDefault(true)
-                                }
-
-                                override fun shouldInterceptRequest(
-                                    view: WebView?,
-                                    request: WebResourceRequest?
-                                ): WebResourceResponse? {
-                                    val reqUrl = request?.url ?: return null
-
-                                    // Ad-blocker & DNS-sinkhole evaluation
-                                    val isHostBlocked = appSettings.isDnsFilterEnabled && reqUrl.host?.let { viewModel.adBlockerEngine.isHostBlocked(it) } == true
-                                    val isAdBlocked = appSettings.isAdBlockerEnabled && viewModel.adBlockerEngine.shouldBlockRequest(reqUrl)
-
-                                    if (isHostBlocked || isAdBlocked) {
-                                        // StateFlow.update is lock-free and thread-safe; avoids allocating Runnables on mainHandler
-                                        viewModel.onAdBlocked()
-                                        return viewModel.adBlockerEngine.createEmptyResourceResponse()
-                                    }
-
-                                    // Sniff media stream requests (.m3u8, .mpd, .mp4, .m4a) only if auto-sniff is enabled
-                                    val urlString = reqUrl.toString()
-                                    val pageUrl = viewModel.uiState.value.currentLoadedUrl ?: ""
-                                    val isOnKnownPlatform = viewModel.mediaSniffer.isSupportedPlatformUrl(pageUrl)
-
-                                    if (appSettings.isAutoSnifferEnabled && !isOnKnownPlatform && viewModel.mediaSniffer.isMediaOrDownloadableUrl(urlString)) {
+                                addJavascriptInterface(object {
+                                    @JavascriptInterface
+                                    fun onMediaFound(mediaUrl: String) {
                                         val currentMedia = viewModel.uiState.value.detectedMediaState
-                                        val isChunkOrSegment = urlString.contains("videoplayback") || urlString.contains("range=") || urlString.contains(".ts")
-                                        if (currentMedia == null && !isChunkOrSegment) {
-                                            val currentTitle = viewModel.uiState.value.pageTitle
+                                        val isChunkOrBlob = mediaUrl.startsWith("blob:") || mediaUrl.contains("videoplayback")
+                                        if (currentMedia == null && !isChunkOrBlob) {
                                             mainHandler.post {
-                                                viewModel.triggerMediaExtraction(urlString, currentTitle)
+                                                viewModel.triggerMediaExtraction(mediaUrl, viewModel.uiState.value.pageTitle, autoShowBottomSheet = false)
                                             }
                                         }
                                     }
 
-                                    return super.shouldInterceptRequest(view, request)
-                                }
+                                    @JavascriptInterface
+                                    fun onUrlChanged(newUrl: String) {
+                                        mainHandler.post {
+                                            lastLoadedProgrammaticUrl = newUrl
+                                            viewModel.onPageStarted(newUrl, isAutoSniffEnabled = true)
+                                        }
+                                    }
+                                }, "UdmMediaBridge")
 
-                                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                    super.onPageStarted(view, url, favicon)
-                                    if (url.isNullOrBlank() || url.equals("about:blank", ignoreCase = true)) return
-                                    lastLoadedProgrammaticUrl = url
-                                    viewModel.onPageStarted(url, appSettings.isAutoSnifferEnabled)
-                                    viewModel.onNavigationStateChanged(canGoBack(), canGoForward())
-                                }
-
-                                override fun onPageCommitVisible(view: WebView?, url: String?) {
-                                    super.onPageCommitVisible(view, url)
-                                    if (appSettings.isAdBlockerEnabled) {
-                                        view?.evaluateJavascript(AdBlockerEngine.BRAVE_SHIELD_CSS_JS, null)
-                                        view?.evaluateJavascript(AdBlockerEngine.BRAVE_YOUTUBE_SHIELD_JS, null)
+                                setDownloadListener { url, _, _, _, _ ->
+                                    mainHandler.post {
+                                        viewModel.triggerMediaExtraction(url, title)
+                                        viewModel.showBottomSheet()
                                     }
                                 }
 
-                                override fun onPageFinished(view: WebView?, url: String?) {
-                                    super.onPageFinished(view, url)
-                                    if (url.isNullOrBlank() || url.equals("about:blank", ignoreCase = true)) return
-                                    lastLoadedProgrammaticUrl = url
-                                    viewModel.onPageFinished(url, view?.title, appSettings.isAutoSnifferEnabled)
-                                    viewModel.onNavigationStateChanged(canGoBack(), canGoForward())
-
-                                    if (appSettings.isAdBlockerEnabled) {
-                                        view?.evaluateJavascript(AdBlockerEngine.BRAVE_SHIELD_CSS_JS, null)
-                                        view?.evaluateJavascript(AdBlockerEngine.BRAVE_YOUTUBE_SHIELD_JS, null)
+                                webViewClient = object : WebViewClient() {
+                                    override fun shouldOverrideUrlLoading(
+                                        view: WebView?,
+                                        request: WebResourceRequest?
+                                    ): Boolean {
+                                        val targetUrl = request?.url?.toString() ?: return false
+                                        if (targetUrl.startsWith("http://", ignoreCase = true) ||
+                                            targetUrl.startsWith("https://", ignoreCase = true)
+                                        ) {
+                                            return false
+                                        }
+                                        if (appSettings.blockPopupsAndRedirects && request?.hasGesture() == false) {
+                                            return true
+                                        }
+                                        return runCatching {
+                                            val intent = Intent(Intent.ACTION_VIEW, request?.url).apply {
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            }
+                                            ctx.startActivity(intent)
+                                            true
+                                        }.getOrDefault(true)
                                     }
 
-                                    // Always inject SPA navigation & media scanner hook
-                                    view?.evaluateJavascript(MediaSniffer.JS_MEDIA_SCANNER, null)
-                                }
-                            }
+                                    override fun shouldInterceptRequest(
+                                        view: WebView?,
+                                        request: WebResourceRequest?
+                                    ): WebResourceResponse? {
+                                        val reqUrl = request?.url ?: return null
 
-                            webChromeClient = object : WebChromeClient() {
-                                override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                    super.onProgressChanged(view, newProgress)
-                                    viewModel.onProgressChanged(newProgress)
-                                    viewModel.onNavigationStateChanged(canGoBack(), canGoForward())
+                                        val isHostBlocked = appSettings.isDnsFilterEnabled && reqUrl.host?.let { viewModel.adBlockerEngine.isHostBlocked(it) } == true
+                                        val isAdBlocked = appSettings.isAdBlockerEnabled && viewModel.adBlockerEngine.shouldBlockRequest(reqUrl)
+
+                                        if (isHostBlocked || isAdBlocked) {
+                                            viewModel.onAdBlocked()
+                                            return viewModel.adBlockerEngine.createEmptyResourceResponse()
+                                        }
+
+                                        val urlString = reqUrl.toString()
+                                        val pageUrl = viewModel.uiState.value.currentLoadedUrl ?: ""
+                                        val isOnKnownPlatform = viewModel.mediaSniffer.isSupportedPlatformUrl(pageUrl)
+
+                                        if (appSettings.isAutoSnifferEnabled && !isOnKnownPlatform && viewModel.mediaSniffer.isMediaOrDownloadableUrl(urlString)) {
+                                            val currentMedia = viewModel.uiState.value.detectedMediaState
+                                            val isChunkOrSegment = urlString.contains("videoplayback") || urlString.contains("range=") || urlString.contains(".ts")
+                                            if (currentMedia == null && !isChunkOrSegment) {
+                                                val currentTitle = viewModel.uiState.value.pageTitle
+                                                mainHandler.post {
+                                                    viewModel.triggerMediaExtraction(urlString, currentTitle)
+                                                }
+                                            }
+                                        }
+
+                                        return super.shouldInterceptRequest(view, request)
+                                    }
+
+                                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                        super.onPageStarted(view, url, favicon)
+                                        if (url.isNullOrBlank() || url.equals("about:blank", ignoreCase = true)) return
+                                        lastLoadedProgrammaticUrl = url
+                                        viewModel.onPageStarted(url, appSettings.isAutoSnifferEnabled)
+                                        viewModel.onNavigationStateChanged(canGoBack(), canGoForward())
+                                    }
+
+                                    override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                                        super.doUpdateVisitedHistory(view, url, isReload)
+                                        if (url.isNullOrBlank() || url.equals("about:blank", ignoreCase = true)) return
+                                        if (url != lastLoadedProgrammaticUrl) {
+                                            lastLoadedProgrammaticUrl = url
+                                            viewModel.onPageStarted(url, appSettings.isAutoSnifferEnabled)
+                                        }
+                                        viewModel.onNavigationStateChanged(canGoBack(), canGoForward())
+                                    }
+
+                                    override fun onPageCommitVisible(view: WebView?, url: String?) {
+                                        super.onPageCommitVisible(view, url)
+                                        if (appSettings.isAdBlockerEnabled) {
+                                            view?.evaluateJavascript(AdBlockerEngine.BRAVE_SHIELD_CSS_JS, null)
+                                            view?.evaluateJavascript(AdBlockerEngine.BRAVE_YOUTUBE_SHIELD_JS, null)
+                                        }
+                                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && viewModel.uiState.value.isForceDarkWebPages) {
+                                            view?.evaluateJavascript(LEGACY_FORCE_DARK_CSS_JS, null)
+                                        }
+                                        view?.evaluateJavascript(MediaSniffer.JS_MEDIA_SCANNER, null)
+                                    }
+
+                                    override fun onPageFinished(view: WebView?, url: String?) {
+                                        super.onPageFinished(view, url)
+                                        if (url.isNullOrBlank() || url.equals("about:blank", ignoreCase = true)) return
+                                        lastLoadedProgrammaticUrl = url
+                                        viewModel.onPageFinished(url, view?.title, appSettings.isAutoSnifferEnabled)
+                                        viewModel.onNavigationStateChanged(canGoBack(), canGoForward())
+
+                                        if (appSettings.isAdBlockerEnabled) {
+                                            view?.evaluateJavascript(AdBlockerEngine.BRAVE_SHIELD_CSS_JS, null)
+                                            view?.evaluateJavascript(AdBlockerEngine.BRAVE_YOUTUBE_SHIELD_JS, null)
+                                        }
+                                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && viewModel.uiState.value.isForceDarkWebPages) {
+                                            view?.evaluateJavascript(LEGACY_FORCE_DARK_CSS_JS, null)
+                                        }
+
+                                        view?.evaluateJavascript(MediaSniffer.JS_MEDIA_SCANNER, null)
+                                    }
                                 }
 
-                                override fun onCreateWindow(
-                                    view: WebView?,
-                                    isDialog: Boolean,
-                                    isUserGesture: Boolean,
-                                    resultMsg: android.os.Message?
-                                ): Boolean {
-                                    if (appSettings.blockPopupsAndRedirects && !isUserGesture) {
+                                webChromeClient = object : WebChromeClient() {
+                                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                        super.onProgressChanged(view, newProgress)
+                                        viewModel.onProgressChanged(newProgress)
+                                        viewModel.onNavigationStateChanged(canGoBack(), canGoForward())
+                                    }
+
+                                    override fun onCreateWindow(
+                                        view: WebView?,
+                                        isDialog: Boolean,
+                                        isUserGesture: Boolean,
+                                        resultMsg: android.os.Message?
+                                    ): Boolean {
+                                        if (appSettings.blockPopupsAndRedirects && !isUserGesture) {
+                                            return false
+                                        }
+                                        if (isUserGesture && resultMsg != null) {
+                                            val parentWebView = view ?: return false
+                                            val transport = resultMsg.obj as? WebView.WebViewTransport
+                                            val tempWebView = WebView(parentWebView.context)
+                                            var destroyed = false
+                                            val destroyTemp = {
+                                                if (!destroyed) {
+                                                    destroyed = true
+                                                    tempWebView.stopLoading()
+                                                    tempWebView.destroy()
+                                                }
+                                            }
+                                            tempWebView.webViewClient = object : WebViewClient() {
+                                                override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
+                                                    request?.url?.toString()?.let { targetUrl ->
+                                                        lastLoadedProgrammaticUrl = targetUrl
+                                                        parentWebView.loadUrl(targetUrl)
+                                                    }
+                                                    mainHandler.post(destroyTemp)
+                                                    return true
+                                                }
+                                            }
+                                            mainHandler.postDelayed(destroyTemp, 5000L)
+                                            transport?.webView = tempWebView
+                                            resultMsg.sendToTarget()
+                                            return true
+                                        }
                                         return false
                                     }
-                                    if (isUserGesture && resultMsg != null) {
-                                        val parentWebView = view ?: return false
-                                        val transport = resultMsg.obj as? WebView.WebViewTransport
-                                        val tempWebView = WebView(parentWebView.context)
-                                        var destroyed = false
-                                        val destroyTemp = {
-                                            if (!destroyed) {
-                                                destroyed = true
-                                                tempWebView.stopLoading()
-                                                tempWebView.destroy()
-                                            }
-                                        }
-                                        tempWebView.webViewClient = object : WebViewClient() {
-                                            override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
-                                                request?.url?.toString()?.let { targetUrl ->
-                                                    lastLoadedProgrammaticUrl = targetUrl
-                                                    parentWebView.loadUrl(targetUrl)
-                                                }
-                                                mainHandler.post(destroyTemp)
-                                                return true
-                                            }
-                                        }
-                                        // Safety cleanup in case target never triggers shouldOverrideUrlLoading
-                                        mainHandler.postDelayed(destroyTemp, 5000L)
-                                        transport?.webView = tempWebView
-                                        resultMsg.sendToTarget()
-                                        return true
-                                    }
-                                    return false
                                 }
+
+                                webViewInstance = this
+                            }
+                        },
+                        update = { webView ->
+                            @SuppressLint("SetJavaScriptEnabled")
+                            webView.settings.javaScriptEnabled = uiState.isJavaScriptEnabled
+                            webView.settings.loadWithOverviewMode = uiState.isDesktopMode
+                            webView.settings.textZoom = uiState.textZoom
+                            webView.settings.javaScriptCanOpenWindowsAutomatically = !appSettings.blockPopupsAndRedirects
+                            webView.settings.setSupportMultipleWindows(!appSettings.blockPopupsAndRedirects)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                webView.settings.isAlgorithmicDarkeningAllowed = uiState.isForceDarkWebPages
+                            }
+                            if (uiState.isDesktopMode) {
+                                webView.settings.userAgentString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                            } else {
+                                webView.settings.userAgentString = null
                             }
 
-                            webViewInstance = this
-                        }
-                    },
-                    update = { webView ->
-                        webView.settings.javaScriptEnabled = uiState.isJavaScriptEnabled
-                        webView.settings.loadWithOverviewMode = uiState.isDesktopMode
-                        webView.settings.javaScriptCanOpenWindowsAutomatically = !appSettings.blockPopupsAndRedirects
-                        webView.settings.setSupportMultipleWindows(!appSettings.blockPopupsAndRedirects)
-                        if (uiState.isDesktopMode) {
-                            webView.settings.userAgentString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                        } else {
-                            webView.settings.userAgentString = null
-                        }
+                            val settingsChanged = appliedTracker.desktopMode != uiState.isDesktopMode ||
+                                appliedTracker.jsEnabled != uiState.isJavaScriptEnabled ||
+                                (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && appliedTracker.forceDark != uiState.isForceDarkWebPages)
 
-                        if (uiState.currentLoadedUrl != null && uiState.currentLoadedUrl != lastLoadedProgrammaticUrl) {
-                            lastLoadedProgrammaticUrl = uiState.currentLoadedUrl
-                            webView.loadUrl(uiState.currentLoadedUrl!!)
+                            appliedTracker.desktopMode = uiState.isDesktopMode
+                            appliedTracker.jsEnabled = uiState.isJavaScriptEnabled
+                            appliedTracker.forceDark = uiState.isForceDarkWebPages
+
+                            if (uiState.currentLoadedUrl != null && uiState.currentLoadedUrl != lastLoadedProgrammaticUrl) {
+                                lastLoadedProgrammaticUrl = uiState.currentLoadedUrl
+                                webView.loadUrl(uiState.currentLoadedUrl!!)
+                            } else if (settingsChanged && uiState.currentLoadedUrl != null) {
+                                webView.reload()
+                            }
+                        },
+                        onRelease = { webView ->
+                            mainHandler.removeCallbacksAndMessages(null)
+                            webView.stopLoading()
+                            webView.loadUrl("about:blank")
+                            webView.onPause()
+                            webView.removeJavascriptInterface("UdmMediaBridge")
+                            webView.clearHistory()
+                            webView.removeAllViews()
+                            webView.destroy()
+                            if (webViewInstance === webView) {
+                                webViewInstance = null
+                            }
                         }
-                    },
-                    onRelease = { webView ->
-                        // Release native Chromium buffers, audio/video decoders, and JS bridge immediately
-                        mainHandler.removeCallbacksAndMessages(null)
-                        webView.stopLoading()
-                        webView.loadUrl("about:blank")
-                        webView.onPause()
-                        webView.removeJavascriptInterface("UdmMediaBridge")
-                        webView.clearHistory()
-                        webView.removeAllViews()
-                        webView.destroy()
-                        if (webViewInstance === webView) {
-                            webViewInstance = null
-                        }
-                    }
-                )
+                    )
+                }
             }
         }
-    }
 
-        // 3. Apple Dynamic Island Media Sniffer Banner (Floats cleanly above the bottom navigation dock)
+        // Clean Floating Media Ready Pill (sits neatly right above the bottom nav)
         val hasMedia = uiState.detectedMediaState != null
         val media = uiState.detectedMediaState
         val isExtracting = uiState.isExtractingMedia
@@ -674,40 +809,32 @@ private fun BrowserScreenContent(
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 76.dp, start = 16.dp, end = 16.dp)
+                .padding(bottom = 16.dp, start = 16.dp, end = 16.dp)
         ) {
             AnimatedVisibility(
                 visible = hasMedia || isExtracting,
                 enter = slideInVertically(
                     initialOffsetY = { it },
-                    animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
-                ) + fadeIn(tween(180)) + scaleIn(
-                    initialScale = 0.9f,
-                    animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
-                ),
+                    animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                ) + fadeIn(tween(160)) + scaleIn(initialScale = 0.94f),
                 exit = slideOutVertically(
                     targetOffsetY = { it },
-                    animationSpec = tween(180, easing = FastOutLinearInEasing)
-                ) + fadeOut(tween(140)) + scaleOut(
-                    targetScale = 0.9f,
-                    animationSpec = tween(180, easing = FastOutLinearInEasing)
-                )
+                    animationSpec = tween(160)
+                ) + fadeOut(tween(130)) + scaleOut(targetScale = 0.94f)
             ) {
                 val colorScheme = MaterialTheme.colorScheme
                 val extendedColors = UdmTheme.extendedColors
                 if (isExtracting) {
-                    // Extracting Progress Pill
-                    Box(
-                        modifier = Modifier
-                            .shadow(12.dp, CircleShape, spotColor = colorScheme.scrim.copy(alpha = 0.25f))
-                            .clip(CircleShape)
-                            .background(colorScheme.surfaceContainerHigh)
-                            .border(1.dp, colorScheme.primary.copy(alpha = 0.5f), CircleShape)
-                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                    Surface(
+                        shape = CircleShape,
+                        color = colorScheme.surfaceContainerHigh,
+                        tonalElevation = 4.dp,
+                        shadowElevation = 6.dp
                     ) {
                         Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
@@ -715,136 +842,66 @@ private fun BrowserScreenContent(
                                 color = colorScheme.primary
                             )
                             Text(
-                                text = "Sniffing Media Streams...",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                text = "Checking media...",
+                                style = MaterialTheme.typography.labelLarge,
                                 color = colorScheme.onSurface
                             )
-                            Box(
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Cancel",
+                                tint = colorScheme.onSurfaceVariant,
                                 modifier = Modifier
-                                    .size(20.dp)
-                                    .clip(CircleShape)
-                                    .background(colorScheme.errorContainer)
+                                    .size(18.dp)
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         viewModel.cancelSniffing()
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Cancel Sniffing",
-                                    tint = colorScheme.onErrorContainer,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                            }
+                                    }
+                            )
                         }
                     }
                 } else if (media != null && (media.videoVariants.isNotEmpty() || media.audioVariants.isNotEmpty() || media.directFileUrl != null || media.directFileVariant != null)) {
-                    // Media Detected Dynamic Island
                     val isDirectFile = media.isDirectFile || (media.videoVariants.isEmpty() && media.audioVariants.isEmpty())
                     val totalVariants = if (isDirectFile) 1 else (media.videoVariants.size + media.audioVariants.size)
-                    val islandAccentColor = if (isDirectFile) extendedColors.success else colorScheme.primary
-                    val islandOnAccentColor = if (isDirectFile) extendedColors.onSuccess else colorScheme.onPrimary
-                    val interactionSource = remember { MutableInteractionSource() }
-                    val isPressed by interactionSource.collectIsPressedAsState()
-                    val islandScale by animateFloatAsState(
-                        targetValue = if (isPressed) 0.95f else 1.0f,
-                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-                        label = "IslandScale"
-                    )
+                    val pillColor = if (isDirectFile) extendedColors.successContainer else colorScheme.primaryContainer
+                    val pillOnColor = if (isDirectFile) extendedColors.onSuccessContainer else colorScheme.onPrimaryContainer
 
-                    Box(
-                        modifier = Modifier
-                            .graphicsLayer {
-                                scaleX = islandScale
-                                scaleY = islandScale
-                            }
-                            .shadow(16.dp, CircleShape, spotColor = colorScheme.scrim.copy(alpha = 0.28f), ambientColor = islandAccentColor.copy(alpha = 0.25f))
-                            .clip(CircleShape)
-                            .background(colorScheme.surfaceContainerHigh)
-                            .border(1.5.dp, islandAccentColor, CircleShape)
-                            .clickable(
-                                interactionSource = interactionSource,
-                                indication = null
-                            ) {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.showBottomSheet()
-                            }
-                            .padding(horizontal = 18.dp, vertical = 10.dp)
+                    Surface(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.showBottomSheet()
+                        },
+                        shape = CircleShape,
+                        color = pillColor,
+                        shadowElevation = 6.dp
                     ) {
                         Row(
+                            modifier = Modifier.padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(islandAccentColor),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Download,
-                                    contentDescription = if (isDirectFile) "Download File" else "Download Streams",
-                                    tint = islandOnAccentColor,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = if (isDirectFile) (media.directFileVariant?.qualityLabel ?: "Direct File Ready") else "$totalVariants Streams Available",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.5.sp,
-                                        color = colorScheme.onSurface
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(islandAccentColor.copy(alpha = 0.16f))
-                                            .padding(horizontal = 5.dp, vertical = 1.dp)
-                                    ) {
-                                        Text(
-                                            text = "READY",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Black,
-                                            color = islandAccentColor
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = if (isDirectFile) "Tap to configure download & start" else "Tap to configure formats & download",
-                                    fontSize = 11.sp,
-                                    color = colorScheme.onSurfaceVariant
-                                )
-                            }
-
                             Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                tint = islandAccentColor,
-                                modifier = Modifier.size(16.dp)
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "Download",
+                                tint = pillOnColor,
+                                modifier = Modifier.size(18.dp)
                             )
-
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .clip(CircleShape)
-                                    .background(colorScheme.surfaceContainerHighest)
-                                    .clickable {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        viewModel.dismissDetectedMedia()
-                                    },
-                                contentAlignment = Alignment.Center
+                            Text(
+                                text = if (isDirectFile) "Download file" else "Download ($totalVariants options)",
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                color = pillOnColor
+                            )
+                            IconButton(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    viewModel.dismissDetectedMedia()
+                                },
+                                modifier = Modifier.size(22.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Dismiss",
-                                    tint = colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(14.dp)
+                                    tint = pillOnColor.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(15.dp)
                                 )
                             }
                         }
@@ -853,7 +910,6 @@ private fun BrowserScreenContent(
             }
         }
 
-        // 4. Tab Switcher Sheet
         if (uiState.isTabSwitcherOpen) {
             TabSwitcherSheet(
                 tabs = uiState.tabs,
@@ -866,7 +922,36 @@ private fun BrowserScreenContent(
             )
         }
 
-        // 5. Search Engine Selection Dialog
+        if (uiState.isHistorySheetOpen) {
+            BrowserHistorySheet(
+                history = uiState.history,
+                onDismiss = { viewModel.setHistorySheetOpen(false) },
+                onOpenUrl = { url -> viewModel.loadUrl(url) },
+                onOpenInNewTab = { url -> viewModel.openNewTab(isIncognito = uiState.isIncognito, initialUrl = url) },
+                onDeleteItem = { id -> viewModel.deleteHistoryItem(id) },
+                onClearHistory = {
+                    viewModel.clearHistory()
+                    scope.launch { snackbarHostState.showSnackbar("History cleared") }
+                }
+            )
+        }
+
+        if (uiState.isPageInfoDialogVisible && uiState.currentLoadedUrl != null) {
+            PageInfoDialog(
+                title = uiState.pageTitle,
+                url = uiState.currentLoadedUrl!!,
+                blockedAdsCount = uiState.blockedAdsCount,
+                isShieldEnabled = appSettings.isAdBlockerEnabled,
+                textZoom = uiState.textZoom,
+                onAdjustZoom = { delta -> viewModel.adjustTextZoom(delta) },
+                onResetZoom = { viewModel.resetTextZoom() },
+                onDismiss = { viewModel.setPageInfoDialogVisible(false) },
+                onCopyUrl = handleCopyCurrentUrl,
+                onPinToFavourite = handlePinCurrentOrOpenDialog,
+                onClearSiteData = handleClearSiteData
+            )
+        }
+
         if (uiState.isSearchEngineDialogVisible) {
             SearchEngineSelectionDialog(
                 selectedEngine = uiState.selectedSearchEngine,
@@ -875,20 +960,20 @@ private fun BrowserScreenContent(
             )
         }
 
-        // 6. Pin Favourite Dialog
         if (uiState.isPinSiteDialogVisible) {
             PinFavouriteDialog(
+                initialUrl = uiState.currentLoadedUrl,
+                initialTitle = uiState.pageTitle,
                 onDismiss = { viewModel.setPinSiteDialogVisible(false) },
                 onPin = { title, url, colorHex ->
-                    viewModel.pinFavourite(title, url, "Pinned", colorHex)
+                    viewModel.pinFavourite(title, url, "Site", colorHex)
                     scope.launch {
-                        snackbarHostState.showSnackbar("Pinned \"$title\" to Favourite")
+                        snackbarHostState.showSnackbar("Bookmarked \"$title\"")
                     }
                 }
             )
         }
 
-        // 7. Remove Favourite Confirmation Dialog
         favouriteToRemove?.let { site ->
             RemoveFavouriteConfirmDialog(
                 site = site,
@@ -897,13 +982,12 @@ private fun BrowserScreenContent(
                     viewModel.removeFavourite(site.id)
                     favouriteToRemove = null
                     scope.launch {
-                        snackbarHostState.showSnackbar("Removed \"${site.title}\" from Favourite")
+                        snackbarHostState.showSnackbar("Removed \"${site.title}\"")
                     }
                 }
             )
         }
 
-        // 6. Download Configuration Sheet
         if (uiState.showMediaBottomSheet && uiState.detectedMediaState != null) {
             DownloadConfigBottomSheet(
                 detectedMedia = uiState.detectedMediaState!!,
@@ -924,7 +1008,7 @@ private fun BrowserScreenContent(
                             threadCount = threadCount,
                             totalBytes = totalBytes
                         )
-                        snackbarHostState.showSnackbar("Enqueued: $fileName ($qualityLabel • $codecLabel)")
+                        snackbarHostState.showSnackbar("Downloading $fileName")
                     }
                     onDownloadTriggered(downloadUrl, title)
                     viewModel.hideBottomSheet()
@@ -932,21 +1016,18 @@ private fun BrowserScreenContent(
             )
         }
 
-        // Snackbar Host for download confirmations
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 80.dp)
+                .padding(bottom = 16.dp)
         )
     }
 }
 
-/**
- * Material 3 Omnibar Composable.
- */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun AppleOmnibar(
+private fun BrowserTopBar(
     uiState: BrowserUiState,
     appSettingsAdBlocker: Boolean,
     onAdBlockerToggle: () -> Unit,
@@ -954,30 +1035,41 @@ fun AppleOmnibar(
     onGo: () -> Unit,
     onClear: () -> Unit,
     onBack: () -> Unit,
+    onForward: () -> Unit,
     onHome: () -> Unit,
     onPinCurrentPage: () -> Unit,
     onOpenSearchEngineDialog: () -> Unit,
+    onOpenPageInfo: () -> Unit,
+    onOpenHistory: () -> Unit,
     onToggleTabs: () -> Unit,
     onToggleMenu: () -> Unit,
     onDismissMenu: () -> Unit,
     onNewTab: () -> Unit,
     onToggleIncognito: () -> Unit,
+    onReopenClosedTab: () -> Unit,
     onToggleDesktopMode: () -> Unit,
-    onToggleJavaScript: () -> Unit,
+    onToggleForceDark: () -> Unit,
+    onOpenFindInPage: () -> Unit,
+    onFindQueryChanged: (String) -> Unit,
+    onFindNext: (Boolean) -> Unit,
+    onCloseFindInPage: () -> Unit,
+    onCopyUrl: () -> Unit,
     onShare: () -> Unit,
-    onReload: () -> Unit,
-    onManualSniff: () -> Unit = {}
+    onOpenExternalBrowser: () -> Unit,
+    onClearSiteData: () -> Unit,
+    onReloadOrStop: () -> Unit,
+    onManualSniff: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val extendedColors = UdmTheme.extendedColors
+    val isOnPage = uiState.currentLoadedUrl != null
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colorScheme.surface)
+            .background(if (isOnPage) colorScheme.surface else colorScheme.background)
             .statusBarsPadding()
     ) {
-        // Incognito Banner
         AnimatedVisibility(
             visible = uiState.isIncognito,
             enter = expandVertically() + fadeIn(),
@@ -1002,17 +1094,15 @@ fun AppleOmnibar(
                         modifier = Modifier.size(14.dp)
                     )
                     Text(
-                        text = "Incognito Tab • History & cookies isolated",
-                        fontSize = 11.5.sp,
-                        color = colorScheme.onTertiaryContainer,
-                        fontWeight = FontWeight.SemiBold
+                        text = "Incognito",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colorScheme.onTertiaryContainer
                     )
                 }
                 Text(
-                    text = "Leave",
-                    fontSize = 11.5.sp,
-                    color = colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
+                    text = "Exit",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = colorScheme.tertiary,
                     modifier = Modifier.clickable { onToggleIncognito() }
                 )
             }
@@ -1021,133 +1111,117 @@ fun AppleOmnibar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val omnibarEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
-            AnimatedVisibility(
-                visible = uiState.currentLoadedUrl != null,
-                enter = fadeIn(tween(180, easing = omnibarEasing)) + expandHorizontally(tween(180, easing = omnibarEasing)),
-                exit = fadeOut(tween(120, easing = FastOutLinearInEasing)) + shrinkHorizontally(tween(180, easing = omnibarEasing))
-            ) {
-                AnimatedIconButton(
-                    onClick = onBack,
-                    onLongClick = onHome,
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back (Hold for Home)",
-                    tint = if (uiState.isIncognito) colorScheme.tertiary else colorScheme.primary
+            if (!isOnPage) {
+                // Clean Home Header
+                Text(
+                    text = if (uiState.isIncognito) "Private" else "Browser",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = colorScheme.onBackground,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 4.dp)
                 )
-            }
 
-            AnimatedIconButton(
-                onClick = onHome,
-                icon = Icons.Default.Home,
-                contentDescription = "Home",
-                tint = if (uiState.currentLoadedUrl != null) {
-                    colorScheme.onSurfaceVariant
-                } else {
-                    if (uiState.isIncognito) colorScheme.tertiary else colorScheme.primary
-                }
-            )
-
-            var isEditingUrl by remember(uiState.currentLoadedUrl) { mutableStateOf(false) }
-
-            val displayHost = remember(uiState.currentLoadedUrl) {
-                uiState.currentLoadedUrl?.let { url ->
-                    try {
-                        val uri = java.net.URI(url)
-                        val host = uri.host?.removePrefix("www.")
-                        if (!host.isNullOrBlank()) host else url
-                    } catch (_: Exception) {
-                        url
-                    }
-                }
-            }
-
-            val omnibarBg = colorScheme.surfaceContainerHigh
-            val omnibarBorder = if (uiState.isIncognito) {
-                colorScheme.tertiary.copy(alpha = 0.6f)
+                UdmHeaderActionButton(
+                    icon = Icons.Default.History,
+                    contentDescription = "History",
+                    onClick = onOpenHistory
+                )
             } else {
-                colorScheme.outlineVariant
-            }
-            val engineBtnBg = colorScheme.surfaceContainerHighest
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(44.dp)
-                    .clip(CircleShape)
-                    .background(omnibarBg)
-                    .border(
-                        width = 1.dp,
-                        color = omnibarBorder,
-                        shape = CircleShape
-                    )
-                    .padding(horizontal = 12.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
+                // Clean Loaded Webpage Omnibar
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .combinedClickable(
+                            onClick = onBack,
+                            onLongClick = onHome
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(engineBtnBg)
-                            .clickable { onOpenSearchEngineDialog() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (uiState.currentLoadedUrl != null) Icons.Default.Lock else Icons.Default.Search,
-                            contentDescription = "Search Engine: ${uiState.selectedSearchEngine.displayName}",
-                            tint = if (uiState.isIncognito) colorScheme.tertiary else colorScheme.primary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                var isEditingUrl by remember(uiState.currentLoadedUrl) { mutableStateOf(false) }
+                val urlFocusRequester = remember { FocusRequester() }
+                LaunchedEffect(isEditingUrl) {
+                    if (isEditingUrl) {
+                        runCatching { urlFocusRequester.requestFocus() }
+                    }
+                }
+
+                val activeUrl = uiState.currentLoadedUrl
+                val isHttps = activeUrl.startsWith("https://", ignoreCase = true)
+                val displayHost = remember(activeUrl) {
+                    runCatching {
+                        URI(activeUrl).host?.removePrefix("www.")?.takeIf { it.isNotBlank() }
+                    }.getOrNull() ?: activeUrl
+                }
+
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(42.dp)
+                        .clip(CircleShape)
+                        .background(colorScheme.surfaceContainerHigh)
+                        .padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = when {
+                            uiState.isIncognito -> Icons.Default.VpnLock
+                            isHttps -> Icons.Default.Lock
+                            else -> Icons.Default.LockOpen
+                        },
+                        contentDescription = "Page info",
+                        tint = when {
+                            uiState.isIncognito -> colorScheme.tertiary
+                            isHttps -> extendedColors.success
+                            else -> colorScheme.error
+                        },
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clickable { onOpenPageInfo() }
+                    )
 
                     Box(modifier = Modifier.weight(1f)) {
-                        if (uiState.currentLoadedUrl != null && !isEditingUrl) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
+                        if (!isEditingUrl) {
+                            Text(
+                                text = displayHost,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { isEditingUrl = true }
-                            ) {
-                                Text(
-                                    text = displayHost ?: "",
-                                    style = TextStyle(
-                                        color = colorScheme.onSurface,
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
+                            )
                         } else {
                             if (uiState.urlInput.isEmpty()) {
                                 Text(
-                                    text = uiState.selectedSearchEngine.hint,
-                                    color = colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                                    fontSize = 13.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    text = "Search or enter URL",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    maxLines = 1
                                 )
                             }
-
                             BasicTextField(
                                 value = uiState.urlInput,
                                 onValueChange = onUrlChanged,
                                 singleLine = true,
                                 textStyle = TextStyle(
                                     color = colorScheme.onSurface,
-                                    fontSize = 13.5.sp,
-                                    fontWeight = FontWeight.Normal
+                                    fontSize = 14.sp
                                 ),
                                 cursorBrush = SolidColor(colorScheme.primary),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
@@ -1155,200 +1229,196 @@ fun AppleOmnibar(
                                     isEditingUrl = false
                                     onGo()
                                 }),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(urlFocusRequester)
                             )
                         }
                     }
 
-                    AnimatedVisibility(
-                        visible = (uiState.currentLoadedUrl == null || isEditingUrl) && uiState.urlInput.isNotEmpty(),
-                        enter = fadeIn() + scaleIn(),
-                        exit = fadeOut() + scaleOut()
-                    ) {
-                        IconButton(
-                            onClick = onClear,
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Clear,
-                                contentDescription = "Clear",
-                                tint = colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
+                    if (isEditingUrl && uiState.urlInput.isNotEmpty()) {
+                        Icon(
+                            imageVector = Icons.Default.Clear,
+                            contentDescription = "Clear",
+                            tint = colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clickable { onClear() }
+                        )
+                    } else if (!isEditingUrl) {
+                        Icon(
+                            imageVector = if (uiState.isLoading) Icons.Default.Close else Icons.Default.Refresh,
+                            contentDescription = if (uiState.isLoading) "Stop" else "Reload",
+                            tint = colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(17.dp)
+                                .clickable { onReloadOrStop() }
+                        )
                     }
                 }
-            }
 
-            // Sniffer / Media Detector Action Pill
-            if (uiState.currentLoadedUrl != null) {
+                // Compact Media Sniff Button
                 val mediaState = uiState.detectedMediaState
                 val isDirect = mediaState?.isDirectFile == true || (mediaState != null && mediaState.videoVariants.isEmpty() && mediaState.audioVariants.isEmpty())
                 val totalStreamCount = if (isDirect) 1 else ((mediaState?.videoVariants?.size ?: 0) + (mediaState?.audioVariants?.size ?: 0))
                 val hasStreams = totalStreamCount > 0
-                val streamCount = totalStreamCount
                 val isExtracting = uiState.isExtractingMedia
-                val pillColor = if (isDirect) extendedColors.success else colorScheme.primary
-                val pillOnColor = if (isDirect) extendedColors.onSuccess else colorScheme.onPrimary
 
-                Box(
-                    modifier = Modifier
-                        .height(34.dp)
-                        .clip(CircleShape)
-                        .background(
-                            when {
-                                hasStreams -> pillColor
-                                isExtracting -> colorScheme.primaryContainer
-                                else -> colorScheme.surfaceContainerHigh
-                            }
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = if (hasStreams) pillColor else colorScheme.outlineVariant,
-                            shape = CircleShape
-                        )
-                        .clickable { onManualSniff() }
-                        .padding(horizontal = 9.dp),
-                    contentAlignment = Alignment.Center
+                Surface(
+                    onClick = onManualSniff,
+                    shape = CircleShape,
+                    color = when {
+                        hasStreams -> colorScheme.primary
+                        isExtracting -> colorScheme.primaryContainer
+                        else -> colorScheme.surfaceContainerHigh
+                    },
+                    modifier = Modifier.height(36.dp)
                 ) {
                     Row(
+                        modifier = Modifier.padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         if (isExtracting) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(13.dp),
-                                strokeWidth = 1.8.dp,
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
                                 color = colorScheme.onPrimaryContainer
                             )
                         } else {
                             Icon(
                                 imageVector = Icons.Default.Download,
-                                contentDescription = if (hasStreams) "Streams Ready" else "Sniff Media Streams",
-                                tint = if (hasStreams) pillOnColor else colorScheme.primary,
-                                modifier = Modifier.size(15.dp)
+                                contentDescription = "Download media",
+                                tint = if (hasStreams) colorScheme.onPrimary else colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(17.dp)
                             )
                         }
                         if (hasStreams) {
                             Text(
-                                text = "$streamCount",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = pillOnColor
+                                text = "$totalStreamCount",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = colorScheme.onPrimary
                             )
                         }
                     }
                 }
             }
 
-            // Tab Switcher Pill Button
             TabCountButton(
                 tabCount = uiState.tabs.size,
                 isIncognito = uiState.isIncognito,
                 onClick = onToggleTabs
             )
 
-            // More Options Dropdown
             Box {
-                AnimatedIconButton(
-                    onClick = onToggleMenu,
+                UdmHeaderActionButton(
                     icon = Icons.Default.MoreVert,
-                    contentDescription = "More Options",
-                    tint = colorScheme.onSurfaceVariant
+                    contentDescription = "Menu",
+                    onClick = onToggleMenu,
+                    modifier = Modifier.size(if (isOnPage) 36.dp else 40.dp)
                 )
 
                 DropdownMenu(
                     expanded = uiState.isMenuExpanded,
                     onDismissRequest = onDismissMenu,
-                    containerColor = colorScheme.surfaceContainerHigh
+                    shape = RoundedCornerShape(20.dp),
+                    containerColor = colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.width(268.dp)
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("Start Page", color = colorScheme.onSurface) },
-                        leadingIcon = { Icon(Icons.Default.Home, contentDescription = null, tint = colorScheme.primary) },
-                        onClick = {
-                            onHome()
-                            onDismissMenu()
-                        }
-                    )
-                    if (uiState.currentLoadedUrl != null) {
+                    // Quick Icon Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        MenuQuickIcon(
+                            icon = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Forward",
+                            enabled = isOnPage && uiState.canGoForward,
+                            onClick = onForward
+                        )
+                        MenuQuickIcon(
+                            icon = if (uiState.isLoading) Icons.Default.Close else Icons.Default.Refresh,
+                            contentDescription = "Reload",
+                            enabled = isOnPage,
+                            onClick = onReloadOrStop
+                        )
+                        MenuQuickIcon(
+                            icon = Icons.Default.Home,
+                            contentDescription = "Home",
+                            enabled = isOnPage,
+                            onClick = onHome
+                        )
+                        MenuQuickIcon(
+                            icon = Icons.Default.Star,
+                            contentDescription = "Bookmark",
+                            enabled = true,
+                            onClick = onPinCurrentPage
+                        )
+                        MenuQuickIcon(
+                            icon = Icons.Default.Share,
+                            contentDescription = "Share",
+                            enabled = isOnPage,
+                            onClick = onShare
+                        )
+                    }
+
+                    HorizontalDivider(color = colorScheme.outlineVariant.copy(alpha = 0.45f))
+
+                    if (isOnPage) {
                         DropdownMenuItem(
-                            text = {
-                                Text(
-                                    when {
-                                        uiState.isExtractingMedia -> "Sniffing streams..."
-                                        uiState.detectedMediaState != null -> "Detected Streams (${uiState.detectedMediaState.videoVariants.size})"
-                                        else -> "Sniff Media on Page"
-                                    },
-                                    color = colorScheme.onSurface
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Default.Download,
-                                    contentDescription = null,
-                                    tint = colorScheme.primary
-                                )
-                            },
+                            text = { Text("Download media") },
+                            leadingIcon = { Icon(Icons.Default.Download, contentDescription = null, tint = colorScheme.primary) },
                             onClick = {
                                 onManualSniff()
                                 onDismissMenu()
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Pin to Favourite", color = colorScheme.onSurface) },
-                            leadingIcon = { Icon(Icons.Default.Star, contentDescription = null, tint = colorScheme.primary) },
-                            onClick = {
-                                onPinCurrentPage()
-                                onDismissMenu()
-                            }
+                            text = { Text("Find in page") },
+                            leadingIcon = { Icon(Icons.Default.FindInPage, contentDescription = null) },
+                            onClick = onOpenFindInPage
                         )
+                        DropdownMenuItem(
+                            text = { Text("Copy link") },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                            onClick = onCopyUrl
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Page info & zoom") },
+                            leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                            onClick = onOpenPageInfo
+                        )
+                        HorizontalDivider(color = colorScheme.outlineVariant.copy(alpha = 0.45f))
                     }
-                    HorizontalDivider(color = colorScheme.outlineVariant)
 
                     DropdownMenuItem(
-                        text = {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f, fill = false)) {
-                                    Text("Brave Shields", color = colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                                    Text(
-                                        text = if (appSettingsAdBlocker) "${uiState.blockedAdsCount} blocked" else "Shields Off",
-                                        fontSize = 11.sp,
-                                        color = if (appSettingsAdBlocker) colorScheme.primary else colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Switch(
-                                    checked = appSettingsAdBlocker,
-                                    onCheckedChange = { onAdBlockerToggle() }
-                                )
-                            }
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.Shield,
-                                contentDescription = null,
-                                tint = if (appSettingsAdBlocker) colorScheme.primary else colorScheme.onSurfaceVariant
-                            )
-                        },
-                        onClick = onAdBlockerToggle
-                    )
-
-                    HorizontalDivider(color = colorScheme.outlineVariant)
-                    DropdownMenuItem(
-                        text = { Text("New Tab", color = colorScheme.onSurface) },
-                        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, tint = colorScheme.primary) },
+                        text = { Text("New tab") },
+                        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
                         onClick = onNewTab
                     )
                     DropdownMenuItem(
-                        text = { Text(if (uiState.isIncognito) "Exit Incognito Tab" else "New Incognito Tab", color = colorScheme.onSurface) },
-                        leadingIcon = { Icon(Icons.Default.VpnLock, contentDescription = null, tint = colorScheme.tertiary) },
+                        text = { Text(if (uiState.isIncognito) "Exit incognito" else "New incognito tab") },
+                        leadingIcon = { Icon(Icons.Default.VpnLock, contentDescription = null) },
                         onClick = onToggleIncognito
                     )
-                    HorizontalDivider(color = colorScheme.outlineVariant)
+                    if (uiState.recentlyClosedTabs.isNotEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text("Reopen closed tab") },
+                            leadingIcon = { Icon(Icons.Default.Restore, contentDescription = null) },
+                            onClick = onReopenClosedTab
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("History") },
+                        leadingIcon = { Icon(Icons.Default.History, contentDescription = null) },
+                        onClick = onOpenHistory
+                    )
+
+                    HorizontalDivider(color = colorScheme.outlineVariant.copy(alpha = 0.45f))
+
                     DropdownMenuItem(
                         text = {
                             Row(
@@ -1356,14 +1426,11 @@ fun AppleOmnibar(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Desktop Mode", color = colorScheme.onSurface)
-                                Switch(
-                                    checked = uiState.isDesktopMode,
-                                    onCheckedChange = { onToggleDesktopMode() }
-                                )
+                                Text("Desktop site")
+                                Switch(checked = uiState.isDesktopMode, onCheckedChange = { onToggleDesktopMode() })
                             }
                         },
-                        leadingIcon = { Icon(Icons.Default.DesktopWindows, contentDescription = null, tint = colorScheme.onSurfaceVariant) },
+                        leadingIcon = { Icon(Icons.Default.DesktopWindows, contentDescription = null) },
                         onClick = onToggleDesktopMode
                     )
                     DropdownMenuItem(
@@ -1373,36 +1440,134 @@ fun AppleOmnibar(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("JavaScript", color = colorScheme.onSurface)
-                                Switch(
-                                    checked = uiState.isJavaScriptEnabled,
-                                    onCheckedChange = { onToggleJavaScript() }
+                                Text("Dark pages")
+                                Switch(checked = uiState.isForceDarkWebPages, onCheckedChange = { onToggleForceDark() })
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Default.DarkMode, contentDescription = null) },
+                        onClick = onToggleForceDark
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Ad blocker")
+                                Switch(checked = appSettingsAdBlocker, onCheckedChange = { onAdBlockerToggle() })
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Default.Shield, contentDescription = null) },
+                        onClick = onAdBlockerToggle
+                    )
+
+                    HorizontalDivider(color = colorScheme.outlineVariant.copy(alpha = 0.45f))
+
+                    DropdownMenuItem(
+                        text = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Search engine")
+                                Text(
+                                    text = uiState.selectedSearchEngine.displayName,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colorScheme.primary
                                 )
                             }
                         },
-                        leadingIcon = { Icon(Icons.Default.Javascript, contentDescription = null, tint = colorScheme.onSurfaceVariant) },
-                        onClick = onToggleJavaScript
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        onClick = onOpenSearchEngineDialog
                     )
-                    HorizontalDivider(color = colorScheme.outlineVariant)
+                    if (isOnPage) {
+                        DropdownMenuItem(
+                            text = { Text("Open in browser") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
+                            onClick = onOpenExternalBrowser
+                        )
+                    }
                     DropdownMenuItem(
-                        text = { Text("Share Page", color = colorScheme.onSurface) },
-                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = colorScheme.onSurfaceVariant) },
-                        onClick = onShare,
-                        enabled = uiState.currentLoadedUrl != null
+                        text = { Text("Clear cache & cookies", color = colorScheme.error) },
+                        leadingIcon = { Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = colorScheme.error) },
+                        onClick = onClearSiteData
                     )
-                    DropdownMenuItem(
-                        text = { Text("Reload", color = colorScheme.onSurface) },
-                        leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null, tint = colorScheme.onSurfaceVariant) },
-                        onClick = onReload,
-                        enabled = uiState.currentLoadedUrl != null
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = isOnPage && uiState.isFindInPageVisible,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            val findFocusRequester = remember { FocusRequester() }
+            LaunchedEffect(Unit) {
+                runCatching { findFocusRequester.requestFocus() }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colorScheme.surfaceContainerLow)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp)
+                        .clip(CircleShape)
+                        .background(colorScheme.surfaceContainerHigh)
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (uiState.findQuery.isEmpty()) {
+                        Text(
+                            text = "Find in page...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorScheme.onSurfaceVariant
+                        )
+                    }
+                    BasicTextField(
+                        value = uiState.findQuery,
+                        onValueChange = onFindQueryChanged,
+                        singleLine = true,
+                        textStyle = TextStyle(color = colorScheme.onSurface, fontSize = 13.sp),
+                        cursorBrush = SolidColor(colorScheme.primary),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { onFindNext(true) }),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(findFocusRequester)
                     )
+                }
+
+                if (uiState.findQuery.isNotEmpty()) {
+                    Text(
+                        text = "${uiState.findActiveMatch}/${uiState.findTotalMatches}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (uiState.findTotalMatches > 0) colorScheme.primary else colorScheme.error
+                    )
+                }
+
+                IconButton(onClick = { onFindNext(false) }, enabled = uiState.findTotalMatches > 0, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous")
+                }
+                IconButton(onClick = { onFindNext(true) }, enabled = uiState.findTotalMatches > 0, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next")
+                }
+                IconButton(onClick = onCloseFindInPage, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close")
                 }
             }
         }
 
         val animatedProgress by animateFloatAsState(
             targetValue = if (uiState.isLoading) (uiState.progress / 100f).coerceIn(0.08f, 1f) else 0f,
-            animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing),
+            animationSpec = tween(durationMillis = 160, easing = LinearOutSlowInEasing),
             label = "PageLoadProgress"
         )
         if (uiState.isLoading) {
@@ -1416,117 +1581,32 @@ fun AppleOmnibar(
                     modifier = Modifier
                         .fillMaxWidth(animatedProgress)
                         .height(2.5.dp)
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(
-                                    colorScheme.primary,
-                                    colorScheme.secondary
-                                )
-                            )
-                        )
+                        .background(colorScheme.primary)
                 )
             }
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun AnimatedIconButton(
-    onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null,
+private fun MenuQuickIcon(
     icon: ImageVector,
     contentDescription: String,
-    tint: Color,
-    modifier: Modifier = Modifier
+    enabled: Boolean,
+    onClick: () -> Unit
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.88f else 1.0f,
-        animationSpec = if (isPressed) {
-            tween(durationMillis = 80, easing = LinearOutSlowInEasing)
-        } else {
-            spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow)
-        },
-        label = "ButtonScale"
-    )
-
-    Box(
-        modifier = modifier
-            .size(36.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(CircleShape)
-            .combinedClickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick,
-                onLongClick = onLongClick
-            ),
-        contentAlignment = Alignment.Center
+    val colorScheme = MaterialTheme.colorScheme
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(40.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = tint,
+            tint = if (enabled) colorScheme.onSurface else colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
             modifier = Modifier.size(20.dp)
         )
-    }
-}
-
-@Composable
-fun AdBlockShieldPill(
-    isEnabled: Boolean,
-    blockedCount: Int,
-    onClick: () -> Unit
-) {
-    val colorScheme = MaterialTheme.colorScheme
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.90f else 1.0f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-        label = "ShieldScale"
-    )
-
-    Box(
-        modifier = Modifier
-            .height(34.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(CircleShape)
-            .background(if (isEnabled) colorScheme.primaryContainer else colorScheme.surfaceContainerHigh)
-            .border(
-                width = 1.dp,
-                color = if (isEnabled) colorScheme.primary.copy(alpha = 0.5f) else colorScheme.outlineVariant,
-                shape = CircleShape
-            )
-            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
-            .padding(horizontal = 10.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Shield,
-                contentDescription = "Shield",
-                tint = if (isEnabled) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(14.dp)
-            )
-            Text(
-                text = if (isEnabled) "$blockedCount" else "Off",
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isEnabled) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant
-            )
-        }
     }
 }
 
@@ -1537,42 +1617,29 @@ fun TabCountButton(
     onClick: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.94f else 1.0f,
-        animationSpec = tween(durationMillis = 100, easing = LinearOutSlowInEasing),
-        label = "TabScale"
-    )
-
     Box(
         modifier = Modifier
             .size(34.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
             .clip(RoundedCornerShape(10.dp))
             .background(colorScheme.surfaceContainerHigh)
             .border(
-                width = 1.dp,
-                color = if (isIncognito) colorScheme.tertiary else colorScheme.primary,
+                width = 1.5.dp,
+                color = if (isIncognito) colorScheme.tertiary else colorScheme.onSurfaceVariant,
                 shape = RoundedCornerShape(10.dp)
             )
-            .clickable(interactionSource = interactionSource, indication = null) { onClick() },
+            .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = "$tabCount",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Black,
-            color = if (isIncognito) colorScheme.tertiary else colorScheme.primary
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            color = if (isIncognito) colorScheme.tertiary else colorScheme.onSurface
         )
     }
 }
 
 /**
- * Browser Home Dashboard using Material 3 semantic color tokens.
+ * Clean, airy Material 3 Expressive Browser Start Page.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1587,12 +1654,17 @@ fun BrowserHomeDashboard(
     onRemoveFavourite: (FavouriteSite) -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
-    val scrollState = rememberScrollState()
-    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
+    val scrollState = rememberScrollState()
     var searchInput by remember { mutableStateOf("") }
 
-    val clipText = clipboardManager.getText()?.text
+    val clipText = remember {
+        runCatching {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cm?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
+        }.getOrNull()
+    }
     val hasClipboardUrl = !clipText.isNullOrBlank() &&
         (clipText.startsWith("http://", ignoreCase = true) || clipText.startsWith("https://", ignoreCase = true))
 
@@ -1601,158 +1673,63 @@ fun BrowserHomeDashboard(
             .fillMaxSize()
             .background(colorScheme.background)
             .verticalScroll(scrollState)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        // 1. Incognito Isolation Banner
-        if (isIncognito) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(colorScheme.tertiaryContainer)
-                    .border(1.dp, colorScheme.tertiary.copy(alpha = 0.4f), RoundedCornerShape(18.dp))
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.VpnLock,
-                        contentDescription = null,
-                        tint = colorScheme.onTertiaryContainer,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = "Incognito Tab • History, cookies & caches discarded on close",
-                        fontSize = 12.sp,
-                        color = colorScheme.onTertiaryContainer,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-        }
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // 2. Hero Brand Header & Search Engine Picker
+        // 1. Clean Hero Search Bar
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 10.dp, bottom = 4.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(colorScheme.primaryContainer)
-                    .border(1.5.dp, colorScheme.primary.copy(alpha = 0.45f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Bolt,
-                    contentDescription = "UDM Browser",
-                    tint = colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-
-            Text(
-                text = "Universal Browser",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 22.sp,
-                    letterSpacing = (-0.3).sp
-                ),
-                color = colorScheme.onBackground
+            UdmIconSquircle(
+                icon = if (isIncognito) Icons.Default.VpnLock else Icons.Default.Public,
+                containerColor = if (isIncognito) colorScheme.tertiaryContainer else colorScheme.primaryContainer,
+                contentColor = if (isIncognito) colorScheme.onTertiaryContainer else colorScheme.onPrimaryContainer,
+                size = 56.dp,
+                iconSize = 28.dp,
+                cornerRadius = 18.dp
             )
 
             Surface(
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onSearchEngineClick()
-                },
+                modifier = Modifier.fillMaxWidth(),
                 shape = CircleShape,
-                color = colorScheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, colorScheme.outlineVariant)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        tint = colorScheme.primary,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Text(
-                        text = selectedSearchEngine.displayName,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colorScheme.onSurface
-                    )
-                    Text(
-                        text = "▾",
-                        fontSize = 11.sp,
-                        color = colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        // 3. Prominent Search & Sniffer Input Capsule
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(22.dp),
-            colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainerLow),
-            border = BorderStroke(1.dp, colorScheme.outlineVariant)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                color = colorScheme.surfaceContainerHigh
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(colorScheme.surface)
-                        .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(14.dp))
-                        .padding(horizontal = 12.dp),
+                        .height(52.dp)
+                        .padding(start = 16.dp, end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
                         tint = colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     )
 
                     Box(modifier = Modifier.weight(1f)) {
                         if (searchInput.isEmpty()) {
                             Text(
-                                text = "Search ${selectedSearchEngine.displayName} or enter URL...",
-                                color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                fontSize = 13.sp,
+                                text = "Search ${selectedSearchEngine.displayName} or enter URL",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-
                         BasicTextField(
                             value = searchInput,
                             onValueChange = { searchInput = it },
                             singleLine = true,
                             textStyle = TextStyle(
                                 color = colorScheme.onSurface,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Normal
+                                fontSize = 15.sp
                             ),
                             cursorBrush = SolidColor(colorScheme.primary),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
@@ -1769,168 +1746,97 @@ fun BrowserHomeDashboard(
                     if (searchInput.isNotEmpty()) {
                         IconButton(
                             onClick = { searchInput = "" },
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Clear,
                                 contentDescription = "Clear",
                                 tint = colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
-                    }
-
-                    Surface(
-                        onClick = {
-                            if (searchInput.isNotBlank()) {
+                        Surface(
+                            onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onBookmarkClicked(searchInput.trim())
-                            }
-                        },
-                        shape = RoundedCornerShape(10.dp),
-                        color = colorScheme.primary,
-                        contentColor = colorScheme.onPrimary
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            },
+                            shape = CircleShape,
+                            color = colorScheme.primary,
+                            modifier = Modifier.size(36.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Bolt,
-                                contentDescription = null,
-                                modifier = Modifier.size(13.dp)
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = "Go",
+                                    tint = colorScheme.onPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        Surface(
+                            onClick = onSearchEngineClick,
+                            shape = CircleShape,
+                            color = colorScheme.surfaceContainerHighest
+                        ) {
                             Text(
-                                text = "Go",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold
+                                text = selectedSearchEngine.displayName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                             )
                         }
                     }
                 }
+            }
 
-                // Smart Clipboard Detection Pill
-                if (hasClipboardUrl && searchInput.isEmpty()) {
-                    Surface(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onPasteAndDownload(clipText!!)
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        color = colorScheme.primaryContainer.copy(alpha = 0.55f),
-                        border = BorderStroke(1.dp, colorScheme.primary.copy(alpha = 0.4f)),
-                        modifier = Modifier.fillMaxWidth()
+            if (hasClipboardUrl && searchInput.isEmpty() && clipText != null) {
+                Surface(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onPasteAndDownload(clipText)
+                    },
+                    shape = CircleShape,
+                    color = colorScheme.primaryContainer.copy(alpha = 0.65f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                modifier = Modifier.weight(1f),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentPaste,
-                                    contentDescription = null,
-                                    tint = colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Column {
-                                    Text(
-                                        text = "Link detected in clipboard",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = colorScheme.onPrimaryContainer
-                                    )
-                                    Text(
-                                        text = clipText!!,
-                                        fontSize = 11.sp,
-                                        color = colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-
-                            Text(
-                                text = "Sniff & Open",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = colorScheme.primary
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.ContentPaste,
+                            contentDescription = null,
+                            tint = colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = clipText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorScheme.onPrimaryContainer,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "Open",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = colorScheme.primary
+                        )
                     }
                 }
             }
         }
 
-        // 4. Speed Dial / Favourites Section
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "Speed Dial",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = colorScheme.onBackground
-                    )
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(colorScheme.secondaryContainer)
-                            .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(8.dp))
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "${favourites.size}",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colorScheme.onSecondaryContainer
-                        )
-                    }
-                }
-
-                Surface(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onPinSiteClick()
-                    },
-                    shape = CircleShape,
-                    color = colorScheme.primaryContainer,
-                    border = BorderStroke(1.dp, colorScheme.primary.copy(alpha = 0.4f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add",
-                            tint = colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Text(
-                            text = "Add Portal",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colorScheme.onPrimaryContainer
-                        )
-                    }
-                }
-            }
+        // 2. Clean 4-Column Bookmarks Grid (No boxed cards, no spam tags)
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(
+                text = "Bookmarks",
+                style = MaterialTheme.typography.labelLarge,
+                color = colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp)
+            )
 
             val allItems = favourites
             val rows = (allItems.size + 1 + 3) / 4
@@ -1938,7 +1844,7 @@ fun BrowserHomeDashboard(
             for (rowIndex in 0 until rows) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     for (colIndex in 0 until 4) {
                         val itemIndex = rowIndex * 4 + colIndex
@@ -1956,9 +1862,10 @@ fun BrowserHomeDashboard(
                             }
                             val siteIcon = remember(site.url) { getFavouriteIcon(site.url) }
 
-                            Card(
+                            Column(
                                 modifier = Modifier
                                     .weight(1f)
+                                    .clip(RoundedCornerShape(16.dp))
                                     .combinedClickable(
                                         onClick = {
                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -1968,100 +1875,67 @@ fun BrowserHomeDashboard(
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                             onRemoveFavourite(site)
                                         }
-                                    ),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainerLow),
-                                border = BorderStroke(1.dp, colorScheme.outlineVariant)
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 12.dp, horizontal = 6.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(42.dp)
-                                            .clip(CircleShape)
-                                            .background(accentColor.copy(alpha = 0.14f))
-                                            .border(1.dp, accentColor.copy(alpha = 0.45f), CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = siteIcon,
-                                            contentDescription = site.title,
-                                            tint = accentColor,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                    Text(
-                                        text = site.title,
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = colorScheme.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
                                     )
-                                    Text(
-                                        text = site.badge,
-                                        fontSize = 8.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = colorScheme.primary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(colorScheme.surfaceContainerLow),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = siteIcon,
+                                        contentDescription = site.title,
+                                        tint = accentColor,
+                                        modifier = Modifier.size(23.dp)
                                     )
                                 }
+                                Text(
+                                    text = site.title,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.Center
+                                )
                             }
                         } else if (itemIndex == allItems.size) {
-                            Card(
+                            Column(
                                 modifier = Modifier
                                     .weight(1f)
+                                    .clip(RoundedCornerShape(16.dp))
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         onPinSiteClick()
-                                    },
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainer),
-                                border = BorderStroke(1.dp, colorScheme.outlineVariant)
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 12.dp, horizontal = 6.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(42.dp)
-                                            .clip(CircleShape)
-                                            .background(colorScheme.secondaryContainer)
-                                            .border(1.dp, colorScheme.outlineVariant, CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = "Add Portal",
-                                            tint = colorScheme.onSecondaryContainer,
-                                            modifier = Modifier.size(18.dp)
-                                        )
                                     }
-                                    Text(
-                                        text = "Add",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = colorScheme.onSurface,
-                                        maxLines = 1
-                                    )
-                                    Text(
-                                        text = "Custom",
-                                        fontSize = 8.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = colorScheme.onSurfaceVariant,
-                                        maxLines = 1
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(colorScheme.surfaceContainerHigh),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Add bookmark",
+                                        tint = colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(22.dp)
                                     )
                                 }
+                                Text(
+                                    text = "Add",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
                             }
                         } else {
                             Spacer(modifier = Modifier.weight(1f))
@@ -2071,85 +1945,7 @@ fun BrowserHomeDashboard(
             }
         }
 
-        // 5. Engine Telemetry & Protection Strip
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainerLow),
-            border = BorderStroke(1.dp, colorScheme.outlineVariant)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Shield,
-                        contentDescription = null,
-                        tint = colorScheme.primary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = "Engine Shields & Protocol Telemetry",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = colorScheme.onSurface
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    listOf(
-                        Triple(Icons.Default.Bolt, "Sniffer", "4K HLS / MP4"),
-                        Triple(Icons.Default.Security, "Shields", "AdBlock ON"),
-                        Triple(Icons.Default.Speed, "Turbo", "16x Sockets")
-                    ).forEach { (icon, title, desc) ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .clip(CircleShape)
-                                    .background(colorScheme.primaryContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = null,
-                                    tint = colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-                            Column {
-                                Text(
-                                    text = title,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = colorScheme.onSurface
-                                )
-                                Text(
-                                    text = desc,
-                                    fontSize = 9.5.sp,
-                                    color = colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(96.dp))
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
@@ -2173,9 +1969,6 @@ fun parseHexColor(hex: String, fallback: Color = Color(0xFF006874)): Color {
     }
 }
 
-/**
- * Dialog to Pin a custom site into Favourites.
- */
 @Composable
 fun PinFavouriteDialog(
     initialUrl: String? = null,
@@ -2187,242 +1980,99 @@ fun PinFavouriteDialog(
     var title by remember { mutableStateOf(initialTitle ?: "") }
     var url by remember { mutableStateOf(initialUrl ?: "") }
     var selectedColor by remember { mutableStateOf("#00838F") }
-    val clipboardManager = LocalClipboardManager.current
     val haptic = LocalHapticFeedback.current
 
-    val colors = listOf(
-        "#00838F" to "Ocean Teal",
-        "#D32F2F" to "Crimson",
-        "#E65100" to "Orange",
-        "#1565C0" to "Blue",
-        "#6A1B9A" to "Purple",
-        "#B26A00" to "Gold"
-    )
+    val colors = listOf("#00838F", "#D32F2F", "#E65100", "#1565C0", "#6A1B9A", "#B26A00")
 
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            shape = RoundedCornerShape(26.dp),
-            color = colorScheme.surfaceContainerHigh,
-            border = BorderStroke(1.dp, colorScheme.outlineVariant),
-            tonalElevation = 8.dp
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(22.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(24.dp),
+        containerColor = colorScheme.surfaceContainerHigh,
+        title = {
+            Text(
+                text = "Add bookmark",
+                style = MaterialTheme.typography.titleLarge
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Name") },
+                    placeholder = { Text("e.g. GitHub") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("URL") },
+                    placeholder = { Text("https://...") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
+                    colors.forEach { hex ->
+                        val parsed = parseHexColor(hex)
+                        val isSelected = selectedColor.equals(hex, ignoreCase = true)
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(32.dp)
                                 .clip(CircleShape)
-                                .background(colorScheme.primaryContainer)
-                                .border(1.dp, colorScheme.primary.copy(alpha = 0.4f), CircleShape),
+                                .background(parsed)
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedColor = hex
+                                },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = null,
-                                tint = colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "Pin to Favourite",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Speed-dial shortcut on browser home",
-                                fontSize = 11.5.sp,
-                                color = colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "Site Name",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = colorScheme.primary
-                    )
-                    OutlinedTextField(
-                        value = title,
-                        onValueChange = { title = it },
-                        placeholder = { Text("e.g. Vimeo, Reddit, GitHub...", fontSize = 13.sp) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = colorScheme.surface,
-                            unfocusedContainerColor = colorScheme.surface,
-                            focusedBorderColor = colorScheme.primary,
-                            unfocusedBorderColor = colorScheme.outlineVariant,
-                            focusedTextColor = colorScheme.onSurface,
-                            unfocusedTextColor = colorScheme.onSurface
-                        )
-                    )
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Site URL",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colorScheme.primary
-                        )
-                        val clip = clipboardManager.getText()?.text
-                        if (!clip.isNullOrBlank() && (clip.startsWith("http://") || clip.startsWith("https://") || clip.contains("."))) {
-                            Text(
-                                text = "Paste Clipboard",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = colorScheme.primary,
-                                modifier = Modifier.clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    url = clip
-                                    if (title.isBlank()) {
-                                        title = runCatching { java.net.URI(clip).host?.removePrefix("www.")?.substringBefore(".")?.replaceFirstChar { it.uppercase() } }.getOrNull() ?: ""
-                                    }
-                                }
-                            )
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = url,
-                        onValueChange = { url = it },
-                        placeholder = { Text("https://example.com", fontSize = 13.sp) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = colorScheme.surface,
-                            unfocusedContainerColor = colorScheme.surface,
-                            focusedBorderColor = colorScheme.primary,
-                            unfocusedBorderColor = colorScheme.outlineVariant,
-                            focusedTextColor = colorScheme.onSurface,
-                            unfocusedTextColor = colorScheme.onSurface
-                        )
-                    )
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "Accent Color",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        colors.forEach { (hex, _) ->
-                            val parsed = parseHexColor(hex)
-                            val isSelected = selectedColor.equals(hex, ignoreCase = true)
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(parsed)
-                                    .border(
-                                        width = if (isSelected) 3.dp else 1.dp,
-                                        color = if (isSelected) colorScheme.onSurface else Color.Transparent,
-                                        shape = CircleShape
-                                    )
-                                    .clickable {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        selectedColor = hex
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = null,
-                                        tint = if (parsed.luminance() > 0.5f) Color.Black else Color.White,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = if (parsed.luminance() > 0.5f) Color.Black else Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    FilledTonalButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Text("Cancel")
-                    }
-
-                    androidx.compose.material3.Button(
-                        onClick = {
-                            if (url.isNotBlank()) {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                val cleanTitle = title.ifBlank {
-                                    runCatching { java.net.URI(url).host?.removePrefix("www.") }.getOrNull() ?: "Site"
-                                }
-                                onPin(cleanTitle, url, selectedColor)
-                            }
-                        },
-                        modifier = Modifier.weight(1.3f),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Text(
-                            text = "Pin to Favourite",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
                     }
                 }
             }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (url.isNotBlank()) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        val cleanTitle = title.ifBlank {
+                            runCatching { URI(url).host?.removePrefix("www.") }.getOrNull() ?: "Site"
+                        }
+                        onPin(cleanTitle, url, selectedColor)
+                    }
+                },
+                shape = CircleShape
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
         }
-    }
+    )
 }
 
-/**
- * Confirmation dialog before removing a site from Favourites.
- */
 @Composable
 fun RemoveFavouriteConfirmDialog(
     site: FavouriteSite,
@@ -2430,86 +2080,36 @@ fun RemoveFavouriteConfirmDialog(
     onConfirmRemove: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
-
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = colorScheme.surfaceContainerHigh,
-            border = BorderStroke(1.dp, colorScheme.outlineVariant),
-            tonalElevation = 6.dp
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(colorScheme.errorContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = null,
-                            tint = colorScheme.onErrorContainer,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Text(
-                        text = "Remove from Favourite?",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = colorScheme.onSurface
-                    )
-                }
-
-                Text(
-                    text = "Do you want to remove \"${site.title}\" (${site.url}) from your Favourite speed-dial list?",
-                    fontSize = 12.5.sp,
-                    color = colorScheme.onSurfaceVariant
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(24.dp),
+        containerColor = colorScheme.surfaceContainerHigh,
+        title = { Text("Remove bookmark?", style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Text(
+                text = "Remove \"${site.title}\" from bookmarks?",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorScheme.onSurfaceVariant
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirmRemove,
+                shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = colorScheme.error,
+                    contentColor = colorScheme.onError
                 )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    FilledTonalButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Text("Cancel")
-                    }
-
-                    androidx.compose.material3.Button(
-                        onClick = onConfirmRemove,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                            containerColor = colorScheme.error,
-                            contentColor = colorScheme.onError
-                        )
-                    ) {
-                        Text(
-                            text = "Remove",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
-                    }
-                }
+            ) {
+                Text("Remove")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
             }
         }
-    }
+    )
 }
 
 @Preview(name = "Browser Home - Light", showBackground = true)
@@ -2520,8 +2120,8 @@ fun BrowserHomeDashboardLightPreview() {
             isIncognito = false,
             selectedSearchEngine = SearchEngine.DUCKDUCKGO,
             favourites = listOf(
-                FavouriteSite(title = "YouTube", url = "https://m.youtube.com", badge = "4K AV1", colorHex = "#FF0033"),
-                FavouriteSite(title = "Vimeo", url = "https://vimeo.com", badge = "1080p Studio", colorHex = "#00ADEF")
+                FavouriteSite(title = "YouTube", url = "https://m.youtube.com", badge = "Video", colorHex = "#FF0033"),
+                FavouriteSite(title = "Vimeo", url = "https://vimeo.com", badge = "Video", colorHex = "#00ADEF")
             ),
             onSearchEngineClick = {},
             onBookmarkClicked = {},
@@ -2540,8 +2140,8 @@ fun BrowserHomeDashboardDarkPreview() {
             isIncognito = false,
             selectedSearchEngine = SearchEngine.DUCKDUCKGO,
             favourites = listOf(
-                FavouriteSite(title = "YouTube", url = "https://m.youtube.com", badge = "4K AV1", colorHex = "#FF0033"),
-                FavouriteSite(title = "Vimeo", url = "https://vimeo.com", badge = "1080p Studio", colorHex = "#00ADEF")
+                FavouriteSite(title = "YouTube", url = "https://m.youtube.com", badge = "Video", colorHex = "#FF0033"),
+                FavouriteSite(title = "Vimeo", url = "https://vimeo.com", badge = "Video", colorHex = "#00ADEF")
             ),
             onSearchEngineClick = {},
             onBookmarkClicked = {},
