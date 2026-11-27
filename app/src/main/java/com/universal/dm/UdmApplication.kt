@@ -83,8 +83,9 @@ class UdmApplication : Application() {
                                     }
                                 }
                             }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to initialize YoutubeDL or FFmpeg", e)
+                        } catch (t: Throwable) {
+                            if (t is kotlinx.coroutines.CancellationException) throw t
+                            Log.e(TAG, "Failed to initialize YoutubeDL or FFmpeg", t)
                         }
                     }
                 }

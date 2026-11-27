@@ -24,8 +24,8 @@ android {
         applicationId = "com.universal.dm"
         minSdk = 31
         targetSdk = 37
-        versionCode = 6
-        versionName = "3.4"
+        versionCode = 7
+        versionName = "3.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
