@@ -549,6 +549,12 @@ private fun BrowserScreenContent(
                                 settings.setSupportMultipleWindows(true)
                                 settings.javaScriptCanOpenWindowsAutomatically = false
                                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                                runCatching {
+                                    CookieManager.getInstance().setAcceptThirdPartyCookies(
+                                        this,
+                                        !appSettings.blockThirdPartyCookies
+                                    )
+                                }
 
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                     settings.isAlgorithmicDarkeningAllowed = uiState.isForceDarkWebPages
@@ -574,7 +580,10 @@ private fun BrowserScreenContent(
                                     @JavascriptInterface
                                     fun onMediaFound(mediaUrl: String) {
                                         val currentMedia = viewModel.uiState.value.detectedMediaState
-                                        val isChunkOrBlob = mediaUrl.startsWith("blob:") || mediaUrl.contains("videoplayback")
+                                        val isChunkOrBlob = mediaUrl.startsWith("blob:") ||
+                                            mediaUrl.contains("videoplayback") ||
+                                            mediaUrl.contains("/init.", ignoreCase = true) ||
+                                            mediaUrl.contains(".m4s", ignoreCase = true)
                                         if (currentMedia == null && !isChunkOrBlob) {
                                             mainHandler.post {
                                                 viewModel.triggerMediaExtraction(mediaUrl, viewModel.uiState.value.pageTitle, autoShowBottomSheet = false)
@@ -641,7 +650,12 @@ private fun BrowserScreenContent(
 
                                         if (appSettings.isAutoSnifferEnabled && !isOnKnownPlatform && viewModel.mediaSniffer.isMediaOrDownloadableUrl(urlString)) {
                                             val currentMedia = viewModel.uiState.value.detectedMediaState
-                                            val isChunkOrSegment = urlString.contains("videoplayback") || urlString.contains("range=") || urlString.contains(".ts")
+                                            val isChunkOrSegment = urlString.contains("videoplayback") ||
+                                                urlString.contains("range=") ||
+                                                urlString.contains(".ts") ||
+                                                urlString.contains(".m4s", ignoreCase = true) ||
+                                                urlString.contains("/init.", ignoreCase = true) ||
+                                                urlString.contains("soundcloud.cloud", ignoreCase = true)
                                             if (currentMedia == null && !isChunkOrSegment) {
                                                 val currentTitle = viewModel.uiState.value.pageTitle
                                                 mainHandler.post {
@@ -759,6 +773,12 @@ private fun BrowserScreenContent(
                             webView.settings.textZoom = uiState.textZoom
                             webView.settings.javaScriptCanOpenWindowsAutomatically = !appSettings.blockPopupsAndRedirects
                             webView.settings.setSupportMultipleWindows(!appSettings.blockPopupsAndRedirects)
+                            runCatching {
+                                CookieManager.getInstance().setAcceptThirdPartyCookies(
+                                    webView,
+                                    !appSettings.blockThirdPartyCookies
+                                )
+                            }
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                 webView.settings.isAlgorithmicDarkeningAllowed = uiState.isForceDarkWebPages
                             }
@@ -993,6 +1013,7 @@ private fun BrowserScreenContent(
                 detectedMedia = uiState.detectedMediaState!!,
                 onDismiss = { viewModel.hideBottomSheet() },
                 onEnqueueDownload = { title, fileName, downloadUrl, pairedAudioUrl, mediaType, qualityLabel, codecLabel, threadCount, destinationFolder, totalBytes, sourcePageUrl, formatId ->
+                    val capturedThumbUrl = uiState.detectedMediaState?.thumbnailUrl
                     scope.launch {
                         DownloadManager.getInstance(context).enqueueDownload(
                             title = title,
@@ -1006,7 +1027,8 @@ private fun BrowserScreenContent(
                             codecLabel = codecLabel,
                             formatId = formatId,
                             threadCount = threadCount,
-                            totalBytes = totalBytes
+                            totalBytes = totalBytes,
+                            thumbnailUrl = capturedThumbUrl
                         )
                         snackbarHostState.showSnackbar("Downloading $fileName")
                     }

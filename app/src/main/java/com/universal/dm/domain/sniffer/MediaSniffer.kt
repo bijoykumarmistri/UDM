@@ -131,11 +131,23 @@ class MediaSniffer(
                 hostMatchesDomain(host, "vimeo.com") || hostMatchesDomain(host, "dailymotion.com") -> {
                     path.length > 3 && !path.startsWith("/home") && !path.startsWith("/feed")
                 }
+                hostMatchesDomain(host, "soundcloud.com") -> {
+                    val trimmed = path.trim('/')
+                    val firstSeg = trimmed.substringBefore('/')
+                    trimmed.contains('/') &&
+                        firstSeg !in setOf("discover", "search", "stream", "charts", "you", "settings", "feed", "pages", "terms-of-use", "login", "popular")
+                }
                 else -> path.contains("/video") || path.contains("/watch")
             }
         }
 
         val fileName = path.substringAfterLast('/', "")
+        if (fileName.startsWith("init.", ignoreCase = true) ||
+            fileName.startsWith("seg-", ignoreCase = true) ||
+            fileName.startsWith("chunk-", ignoreCase = true)
+        ) {
+            return false
+        }
         val ext = fileName.substringAfterLast('.', "")
         return mediaExtensions.contains(ext)
     }
@@ -176,6 +188,28 @@ class MediaSniffer(
         }
         return rawUrl
     }
+
+    fun getYoutubeVideoId(rawUrl: String): String? = extractYoutubeVideoId(rawUrl)
+
+    /**
+     * Fast YouTube InnerTube resolution without falling back to Python/yt-dlp.
+     * Used by UdmDownloadWorker when a YouTube watch URL is enqueued manually
+     * so playback streams and cover thumbnail start in ~300ms.
+     */
+    suspend fun resolveYoutubeFast(url: String, fallbackTitle: String? = null): DetectedPageMedia? =
+        withContext(Dispatchers.IO) {
+            val cleanUrl = cleanMediaUrl(url)
+            getCachedMedia(cleanUrl)?.let { return@withContext it }
+            val videoId = extractYoutubeVideoId(cleanUrl) ?: return@withContext null
+            extractYoutubeViaInnerTube(
+                videoId = videoId,
+                pageUrl = url,
+                fallbackTitle = fallbackTitle
+            )?.also { media ->
+                mediaCache.put(cleanUrl, media)
+                if (cleanUrl != url) mediaCache.put(url, media)
+            }
+        }
 
     /**
      * Extracts full media metadata, streaming formats, and direct files.
@@ -241,7 +275,7 @@ class MediaSniffer(
                     if (isYouTube) {
                         addOption(
                             "--extractor-args",
-                            "youtube:player_client=android_vr,ios,android;player_skip=webpage,configs,js;skip=translated_subs,hls,dash"
+                            "youtube:skip=translated_subs"
                         )
                     }
                 }
@@ -465,7 +499,7 @@ class MediaSniffer(
             InnerTubeClientProfile(
                 name = "ANDROID_VR",
                 version = "1.60.19",
-                userAgent = "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+                userAgent = ANDROID_VR_USER_AGENT,
                 clientId = "28",
                 buildContext = { id ->
                     JSONObject().apply {
@@ -495,7 +529,7 @@ class MediaSniffer(
             InnerTubeClientProfile(
                 name = "IOS",
                 version = "20.10.4",
-                userAgent = "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+                userAgent = IOS_USER_AGENT,
                 clientId = "5",
                 buildContext = { id ->
                     JSONObject().apply {
@@ -533,7 +567,6 @@ class MediaSniffer(
                     .header("User-Agent", profile.userAgent)
                     .header("X-YouTube-Client-Name", profile.clientId)
                     .header("X-YouTube-Client-Version", profile.version)
-                    .header("Origin", "https://www.youtube.com")
                     .build()
 
                 fastClient.newCall(req).execute().use { resp ->
@@ -962,6 +995,23 @@ class MediaSniffer(
 
     companion object {
         private const val TAG = "MediaSniffer"
+        const val ANDROID_VR_USER_AGENT =
+            "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
+        const val IOS_USER_AGENT =
+            "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
+        const val ANDROID_USER_AGENT =
+            "com.google.android.youtube/19.29.37 (Linux; U; Android 11) gzip"
+
+        fun resolveYoutubeCdnUserAgent(url: String): String? {
+            if (!url.contains("googlevideo.com", ignoreCase = true)) return null
+            return when {
+                url.contains("c=IOS", ignoreCase = true) -> IOS_USER_AGENT
+                url.contains("c=ANDROID_VR", ignoreCase = true) -> ANDROID_VR_USER_AGENT
+                url.contains("c=ANDROID", ignoreCase = true) -> ANDROID_USER_AGENT
+                else -> ANDROID_VR_USER_AGENT
+            }
+        }
+
         private val HEIGHT_NOTE_REGEX = Regex("(\\d{3,4})p?")
         private val CODECS_REGEX = Regex("codecs=\"([^\"]+)\"")
         private val SANITIZE_FILENAME_REGEX = Regex("[^a-zA-Z0-9._\\- ]")
@@ -970,7 +1020,8 @@ class MediaSniffer(
         private val supportedPlatformDomains = listOf(
             "youtube.com", "youtu.be", "vimeo.com", "dailymotion.com",
             "tiktok.com", "instagram.com", "twitter.com", "x.com",
-            "facebook.com", "reddit.com", "bilibili.com", "twitch.tv"
+            "facebook.com", "reddit.com", "bilibili.com", "twitch.tv",
+            "soundcloud.com"
         )
 
         private val mediaExtensions = setOf(

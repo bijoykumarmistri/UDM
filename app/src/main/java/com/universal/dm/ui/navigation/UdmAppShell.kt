@@ -9,17 +9,27 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -31,6 +41,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
@@ -38,10 +49,15 @@ import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.universal.dm.UdmApplication
+import com.universal.dm.core.AppMetadata
+import com.universal.dm.core.AppUpdateManager
+import com.universal.dm.core.AppUpdateStatus
 import com.universal.dm.data.local.DownloadTaskEntity
+import com.universal.dm.domain.sniffer.MediaSizeCalculator
 import com.universal.dm.ui.browser.BrowserScreen
 import com.universal.dm.ui.downloads.DownloadsScreen
 import com.universal.dm.ui.settings.SettingsScreen
@@ -136,6 +152,15 @@ fun UdmAppShell(
     }
 
     val displayBadgeCount = activeTasks.size
+    val isInspection = LocalInspectionMode.current
+    val updateUiState by AppUpdateManager.uiState.collectAsState()
+
+    // Background GitHub release check (throttled every 12 hours)
+    LaunchedEffect(isInspection) {
+        if (!isInspection) {
+            AppUpdateManager.checkForUpdateIfDue(context)
+        }
+    }
 
     // Predictive back gesture visual transformations (Android 16, 17 system animation)
     val predictiveScaleState = animateFloatAsState(
@@ -220,6 +245,145 @@ fun UdmAppShell(
             }
         }
     }
+
+    if (!isInspection && updateUiState.showAutoPrompt) {
+        AppUpdatePromptDialog(
+            status = updateUiState.status,
+            onDownload = { release ->
+                AppUpdateManager.startDownloadAndInstall(context, release)
+            },
+            onInstall = { apkFile ->
+                AppUpdateManager.installApk(context, apkFile)
+            },
+            onOpenGitHub = { url ->
+                AppUpdateManager.openGitHubUrl(context, url)
+            },
+            onDismiss = {
+                AppUpdateManager.dismissAutoPrompt()
+            }
+        )
+    }
+}
+
+@Composable
+private fun AppUpdatePromptDialog(
+    status: AppUpdateStatus,
+    onDownload: (com.universal.dm.core.AppReleaseInfo) -> Unit,
+    onInstall: (java.io.File) -> Unit,
+    onOpenGitHub: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val release = when (status) {
+        is AppUpdateStatus.UpdateAvailable -> status.release
+        is AppUpdateStatus.Downloading -> status.release
+        is AppUpdateStatus.ReadyToInstall -> status.release
+        is AppUpdateStatus.Error -> status.release
+        else -> null
+    } ?: return
+
+    val titleText = when (status) {
+        is AppUpdateStatus.Downloading -> "Downloading ${release.tagName}"
+        is AppUpdateStatus.ReadyToInstall -> "Ready to install ${release.tagName}"
+        is AppUpdateStatus.Error -> "Update download failed"
+        else -> "Update available • ${release.tagName}"
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = titleText) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = release.title,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                )
+                if (release.apkSizeBytes > 0L) {
+                    Text(
+                        text = "Package size: ${MediaSizeCalculator.formatFileSize(release.apkSizeBytes)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (release.releaseNotes.isNotBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow
+                    ) {
+                        Text(
+                            text = release.releaseNotes,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 6,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp)
+                        )
+                    }
+                }
+                when (status) {
+                    is AppUpdateStatus.Downloading -> {
+                        if (status.totalBytes > 0L) {
+                            LinearProgressIndicator(
+                                progress = { (status.progressPercent / 100f).coerceIn(0f, 1f) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(CircleShape)
+                            )
+                            Text(
+                                text = "${MediaSizeCalculator.formatFileSize(status.downloadedBytes)} / ${MediaSizeCalculator.formatFileSize(status.totalBytes)} (${status.progressPercent}%)",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(CircleShape)
+                            )
+                        }
+                    }
+                    is AppUpdateStatus.Error -> {
+                        Text(
+                            text = status.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    else -> Unit
+                }
+                TextButton(
+                    onClick = { onOpenGitHub(release.htmlUrl.ifBlank { AppMetadata.GITHUB_RELEASES_URL }) }
+                ) {
+                    Text("View on ${AppMetadata.GITHUB_DISPLAY_LINK}")
+                }
+            }
+        },
+        confirmButton = {
+            when (status) {
+                is AppUpdateStatus.ReadyToInstall -> {
+                    Button(onClick = { onInstall(status.apkFile) }) {
+                        Text("Install APK")
+                    }
+                }
+                is AppUpdateStatus.Downloading -> {
+                    Button(onClick = {}, enabled = false) {
+                        Text("${status.progressPercent}%")
+                    }
+                }
+                else -> {
+                    Button(onClick = { onDownload(release) }) {
+                        Text(if (release.apkDownloadUrl != null) "Download & Install" else "Open GitHub")
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Later")
+            }
+        }
+    )
 }
 
 /**

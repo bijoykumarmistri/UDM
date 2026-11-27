@@ -333,7 +333,12 @@ fun DownloadConfigContent(
         }
     }
 
-    val defaultVideoHeight = videoQualityOptions.firstOrNull()?.height ?: 1080
+    val targetHeight = appSettings.preferredVideoQuality
+    val defaultVideoHeight = videoQualityOptions
+        .filter { it.height <= targetHeight }
+        .maxByOrNull { it.height }?.height
+        ?: videoQualityOptions.lastOrNull()?.height
+        ?: 1080
     var selectedHeight by remember(detectedMedia.pageUrl) { mutableIntStateOf(defaultVideoHeight) }
     var selectedAudioTier by remember(detectedMedia.pageUrl) { mutableStateOf("studio") }
 

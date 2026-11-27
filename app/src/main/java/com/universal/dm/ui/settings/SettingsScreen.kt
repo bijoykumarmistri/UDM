@@ -4,14 +4,15 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.os.Environment
-import android.os.StatFs
-import android.provider.DocumentsContract
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -28,48 +29,61 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.BatteryChargingFull
-import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Cookie
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.HighQuality
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -77,10 +91,13 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.universal.dm.core.AppMetadata
+import com.universal.dm.core.AppReleaseInfo
+import com.universal.dm.core.AppUpdateManager
+import com.universal.dm.core.AppUpdateStatus
+import com.universal.dm.core.AppUpdateUiState
 import com.universal.dm.core.LogcatExporter
+import com.universal.dm.domain.downloader.DownloadManager
 import com.universal.dm.domain.sniffer.MediaSizeCalculator
-import com.universal.dm.ui.browser.SearchEngine
-import com.universal.dm.ui.browser.SearchEngineSelectionDialog
 import com.universal.dm.ui.components.UdmIconSquircle
 import com.universal.dm.ui.components.UdmScreenHeader
 import com.universal.dm.ui.components.UdmTonalCard
@@ -89,10 +106,29 @@ import com.universal.dm.ui.theme.UdmTextStyles
 import com.universal.dm.ui.theme.UdmTheme
 import com.yausername.youtubedl_android.YoutubeDL
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import kotlin.math.roundToInt
+
+private data class VideoQualityPreset(
+    val height: Int,
+    val label: String
+)
+
+private val VideoQualityPresets = listOf(
+    VideoQualityPreset(2160, "Best"),
+    VideoQualityPreset(1080, "1080p"),
+    VideoQualityPreset(720, "720p"),
+    VideoQualityPreset(480, "480p")
+)
+
+private val SupportAmountOptions = listOf(
+    "50" to "₹50",
+    "100" to "₹100",
+    "250" to "₹250",
+    null to "Custom"
+)
 
 @Composable
 fun SettingsScreen(
@@ -103,6 +139,7 @@ fun SettingsScreen(
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+    val isInspection = LocalInspectionMode.current
 
     val colorScheme = MaterialTheme.colorScheme
     val extendedColors = UdmTheme.extendedColors
@@ -110,8 +147,22 @@ fun SettingsScreen(
     var isUpdatingEngine by remember { mutableStateOf(false) }
     var engineUpdateMessage by remember { mutableStateOf<String?>(null) }
     var isExportingLogs by remember { mutableStateOf(false) }
-    var copiedUpiMessage by remember { mutableStateOf<String?>(null) }
-    var showSearchEngineDialog by remember { mutableStateOf(false) }
+    var reclaimableCacheBytes by remember { mutableLongStateOf(0L) }
+    var isCleaningCache by remember { mutableStateOf(false) }
+    var cacheStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    val updateUiState by AppUpdateManager.uiState.collectAsState()
+    val installedVersion = remember(context, isInspection) {
+        if (isInspection) AppMetadata.APP_VERSION else AppMetadata.getInstalledVersionName(context)
+    }
+
+    LaunchedEffect(isInspection) {
+        if (!isInspection) {
+            reclaimableCacheBytes = runCatching {
+                DownloadManager.getInstance(context).getReclaimableCacheBytes()
+            }.getOrDefault(0L)
+        }
+    }
 
     val exportAndShareLogs: () -> Unit = {
         if (!isExportingLogs) {
@@ -133,22 +184,6 @@ fun SettingsScreen(
         }
     }
 
-    val currentEngine = remember(settings.defaultSearchEngineName) {
-        try {
-            SearchEngine.valueOf(settings.defaultSearchEngineName)
-        } catch (_: Exception) {
-            SearchEngine.DUCKDUCKGO
-        }
-    }
-
-    val freeStorageText = remember {
-        runCatching {
-            val stat = StatFs(Environment.getDataDirectory().path)
-            val freeBytes = stat.availableBlocksLong * stat.blockSizeLong
-            "${MediaSizeCalculator.formatFileSize(freeBytes)} free"
-        }.getOrDefault("Ready")
-    }
-
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -159,39 +194,37 @@ fun SettingsScreen(
             .padding(top = 8.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        UdmScreenHeader(
-            title = "Settings",
-            actions = {
-                IconButton(
-                    onClick = exportAndShareLogs,
-                    enabled = !isExportingLogs
-                ) {
-                    if (isExportingLogs) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = "Share diagnostic logs",
-                            tint = colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        )
+        UdmScreenHeader(title = "Settings")
 
         // 1. APPEARANCE
         SettingsGroupHeader("Appearance")
         SettingsGroupCard {
+            SettingSegmentedRow(
+                icon = Icons.Default.Palette,
+                iconBg = colorScheme.tertiaryContainer,
+                iconTint = colorScheme.onTertiaryContainer,
+                title = "App theme",
+                subtitle = "Choose light, dark, or match device",
+                options = AppThemeMode.entries.map { it to it.label },
+                selectedOption = settings.themeMode,
+                onOptionSelected = { settings.updateThemeMode(it) }
+            )
+
+            SettingsInsetDivider()
+
+            val pitchBlackAllowed = settings.themeMode != AppThemeMode.LIGHT
             SettingSwitchRow(
                 icon = Icons.Default.DarkMode,
                 iconBg = colorScheme.primaryContainer,
                 iconTint = colorScheme.onPrimaryContainer,
                 title = "Pitch black",
-                subtitle = "Pure black background in dark mode",
+                subtitle = if (pitchBlackAllowed) {
+                    "Pure black AMOLED surface in dark mode"
+                } else {
+                    "Available in System or Dark theme"
+                },
                 checked = settings.isPitchBlackEnabled,
+                enabled = pitchBlackAllowed,
                 onCheckedChange = { settings.updatePitchBlack(it) }
             )
         }
@@ -232,7 +265,7 @@ fun SettingsScreen(
                     }
 
                     Text(
-                        text = "${settings.threadCount}",
+                        text = settings.threadCount.toString(),
                         style = UdmTextStyles.TabularMetricSmall.copy(fontWeight = FontWeight.Bold),
                         color = colorScheme.primary,
                         modifier = Modifier.padding(end = 4.dp)
@@ -255,13 +288,15 @@ fun SettingsScreen(
 
             SettingsInsetDivider()
 
-            SettingNavRow(
-                icon = Icons.Default.Folder,
+            SettingSegmentedRow(
+                icon = Icons.Default.HighQuality,
                 iconBg = colorScheme.secondaryContainer,
                 iconTint = colorScheme.onSecondaryContainer,
-                title = "Save location",
-                subtitle = "${settings.defaultDownloadFolder} • $freeStorageText",
-                onClick = { openUdmFolder(context) }
+                title = "Default video quality",
+                subtitle = "Pre-selected cap for detected & link streams",
+                options = VideoQualityPresets.map { it.height to it.label },
+                selectedOption = settings.preferredVideoQuality,
+                onOptionSelected = { settings.updatePreferredVideoQuality(it) }
             )
 
             SettingsInsetDivider()
@@ -283,9 +318,33 @@ fun SettingsScreen(
                 iconBg = extendedColors.successContainer,
                 iconTint = extendedColors.onSuccessContainer,
                 title = "Auto-resume on Wi-Fi",
-                subtitle = "Resume paused tasks automatically",
+                subtitle = "Resume interrupted tasks when Wi-Fi connects",
                 checked = settings.autoResumeOnWifi,
                 onCheckedChange = { settings.updateAutoResumeOnWifi(it) }
+            )
+
+            SettingsInsetDivider()
+
+            SettingSwitchRow(
+                icon = Icons.Default.Refresh,
+                iconBg = colorScheme.tertiaryContainer,
+                iconTint = colorScheme.onTertiaryContainer,
+                title = "Auto-retry on failure",
+                subtitle = "Retry temporary network drops up to 2×",
+                checked = settings.autoRetryOnFailure,
+                onCheckedChange = { settings.updateAutoRetryOnFailure(it) }
+            )
+
+            SettingsInsetDivider()
+
+            SettingSwitchRow(
+                icon = Icons.Default.Image,
+                iconBg = colorScheme.secondaryContainer,
+                iconTint = colorScheme.onSecondaryContainer,
+                title = "Embed music cover art",
+                subtitle = "Save YouTube thumbnail into downloaded audio",
+                checked = settings.embedAudioThumbnail,
+                onCheckedChange = { settings.updateEmbedAudioThumbnail(it) }
             )
 
             SettingsInsetDivider()
@@ -295,7 +354,7 @@ fun SettingsScreen(
                 iconBg = extendedColors.warningContainer,
                 iconTint = extendedColors.onWarningContainer,
                 title = "Completion sound",
-                subtitle = "Play chime when finished",
+                subtitle = "Play chime when downloads finish",
                 checked = settings.soundOnCompletion,
                 onCheckedChange = { settings.updateSoundOnCompletion(it) }
             )
@@ -312,38 +371,15 @@ fun SettingsScreen(
             )
         }
 
-        // 3. BROWSER & PRIVACY
-        SettingsGroupHeader("Browser & Privacy")
+        // 3. PRIVACY (Only protections not already on the Browser page)
+        SettingsGroupHeader("Privacy")
         SettingsGroupCard {
-            SettingNavRow(
-                icon = Icons.Default.Search,
-                iconBg = colorScheme.primaryContainer,
-                iconTint = colorScheme.onPrimaryContainer,
-                title = "Search engine",
-                subtitle = currentEngine.displayName,
-                onClick = { showSearchEngineDialog = true }
-            )
-
-            SettingsInsetDivider()
-
-            SettingSwitchRow(
-                icon = Icons.Default.Block,
-                iconBg = colorScheme.errorContainer,
-                iconTint = colorScheme.onErrorContainer,
-                title = "Ad blocker",
-                subtitle = "Block page and video ads",
-                checked = settings.isAdBlockerEnabled,
-                onCheckedChange = { settings.updateAdBlocker(it) }
-            )
-
-            SettingsInsetDivider()
-
             SettingSwitchRow(
                 icon = Icons.Default.Shield,
                 iconBg = extendedColors.successContainer,
                 iconTint = extendedColors.onSuccessContainer,
                 title = "Tracker protection",
-                subtitle = "Block known tracking domains",
+                subtitle = "Block known analytics & tracking domains",
                 checked = settings.isDnsFilterEnabled,
                 onCheckedChange = { settings.updateDnsFilter(it) }
             )
@@ -355,14 +391,26 @@ fun SettingsScreen(
                 iconBg = colorScheme.tertiaryContainer,
                 iconTint = colorScheme.onTertiaryContainer,
                 title = "Block pop-ups",
-                subtitle = "Prevent unwanted redirects",
+                subtitle = "Prevent unwanted pop-ups & auto-redirects",
                 checked = settings.blockPopupsAndRedirects,
                 onCheckedChange = { settings.updateBlockPopups(it) }
             )
+
+            SettingsInsetDivider()
+
+            SettingSwitchRow(
+                icon = Icons.Default.Cookie,
+                iconBg = colorScheme.secondaryContainer,
+                iconTint = colorScheme.onSecondaryContainer,
+                title = "Block third-party cookies",
+                subtitle = "Reject cross-site tracking cookies",
+                checked = settings.blockThirdPartyCookies,
+                onCheckedChange = { settings.updateBlockThirdPartyCookies(it) }
+            )
         }
 
-        // 4. EXTRACTOR & SUPPORT
-        SettingsGroupHeader("Engine & Support")
+        // 4. ENGINE & STORAGE
+        SettingsGroupHeader("Engine & Storage")
         SettingsGroupCard {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -437,6 +485,82 @@ fun SettingsScreen(
             SettingsInsetDivider()
 
             Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    UdmIconSquircle(
+                        icon = Icons.Default.CleaningServices,
+                        containerColor = colorScheme.primaryContainer,
+                        contentColor = colorScheme.onPrimaryContainer,
+                        size = 38.dp,
+                        iconSize = 19.dp,
+                        cornerRadius = 11.dp
+                    )
+                    Column {
+                        Text(
+                            text = "Temporary cache",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = colorScheme.onSurface
+                        )
+                        Text(
+                            text = when {
+                                cacheStatusMessage != null -> cacheStatusMessage!!
+                                reclaimableCacheBytes > 0L -> "${MediaSizeCalculator.formatFileSize(reclaimableCacheBytes)} reclaimable"
+                                else -> "No leftover temp segments"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (cacheStatusMessage != null) extendedColors.success else colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                FilledTonalButton(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        scope.launch {
+                            isCleaningCache = true
+                            val freed = if (!isInspection) {
+                                runCatching {
+                                    DownloadManager.getInstance(context).clearReclaimableCache()
+                                }.getOrDefault(0L)
+                            } else 0L
+                            reclaimableCacheBytes = 0L
+                            isCleaningCache = false
+                            cacheStatusMessage = if (freed > 0L) {
+                                "Freed ${MediaSizeCalculator.formatFileSize(freed)}"
+                            } else {
+                                "Already clean"
+                            }
+                        }
+                    },
+                    enabled = !isCleaningCache && reclaimableCacheBytes > 0L,
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    if (isCleaningCache) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(15.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("Clean", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+
+            SettingsInsetDivider()
+
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
@@ -488,138 +612,574 @@ fun SettingsScreen(
                     )
                 }
             }
+        }
 
-            SettingsInsetDivider()
+        // 5. APP UPDATE (GitHub Releases + Direct APK Download)
+        SettingsGroupHeader("App Update")
+        AppUpdateCard(
+            installedVersion = installedVersion,
+            updateUiState = updateUiState,
+            onCheckForUpdates = {
+                if (!isInspection) {
+                    scope.launch {
+                        AppUpdateManager.checkForUpdate(context, isManual = true)
+                    }
+                }
+            },
+            onDownloadUpdate = { release ->
+                if (!isInspection) {
+                    AppUpdateManager.startDownloadAndInstall(context, release)
+                }
+            },
+            onInstallUpdate = { apkFile ->
+                if (!isInspection) {
+                    AppUpdateManager.installApk(context, apkFile)
+                }
+            },
+            onOpenGitHub = { url ->
+                if (!isInspection) {
+                    AppUpdateManager.openGitHubUrl(context, url)
+                }
+            }
+        )
 
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // 6. SUPPORT DEVELOPMENT (Redesigned)
+        SettingsGroupHeader("Support Development")
+        SupportDevelopmentCard(
+            onCopyUpi = {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                cm?.setPrimaryClip(ClipData.newPlainText("UPI ID", AppMetadata.DONATION_UPI_ID))
+            },
+            onLaunchUpi = { amount ->
+                val upiUri = AppMetadata.getUpiPaymentUri(amount).toUri()
+                val intent = Intent(Intent.ACTION_VIEW, upiUri)
+                val chooser = Intent.createChooser(intent, "Donate via UPI")
+                runCatching { context.startActivity(chooser) }.onFailure {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    cm?.setPrimaryClip(ClipData.newPlainText("UPI ID", AppMetadata.DONATION_UPI_ID))
+                    Toast.makeText(
+                        context,
+                        "No UPI app found — UPI ID copied",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        )
+
+        Text(
+            text = "${AppMetadata.APP_SHORT_NAME} v$installedVersion",
+            style = MaterialTheme.typography.bodySmall,
+            color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun AppUpdateCard(
+    installedVersion: String,
+    updateUiState: AppUpdateUiState,
+    onCheckForUpdates: () -> Unit,
+    onDownloadUpdate: (AppReleaseInfo) -> Unit,
+    onInstallUpdate: (java.io.File) -> Unit,
+    onOpenGitHub: (String) -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val extendedColors = UdmTheme.extendedColors
+    val haptic = LocalHapticFeedback.current
+    val status = updateUiState.status
+
+    val activeRelease: AppReleaseInfo? = when (status) {
+        is AppUpdateStatus.UpToDate -> status.latestRelease
+        is AppUpdateStatus.UpdateAvailable -> status.release
+        is AppUpdateStatus.Downloading -> status.release
+        is AppUpdateStatus.ReadyToInstall -> status.release
+        is AppUpdateStatus.Error -> status.release
+        else -> null
+    }
+
+    val iconVector = when (status) {
+        is AppUpdateStatus.UpToDate -> Icons.Default.CheckCircle
+        is AppUpdateStatus.UpdateAvailable,
+        is AppUpdateStatus.ReadyToInstall -> Icons.Default.SystemUpdate
+        is AppUpdateStatus.Downloading -> Icons.Default.Download
+        else -> Icons.Default.SystemUpdate
+    }
+
+    val iconBg = when (status) {
+        is AppUpdateStatus.UpToDate -> extendedColors.successContainer
+        is AppUpdateStatus.UpdateAvailable,
+        is AppUpdateStatus.ReadyToInstall -> colorScheme.primaryContainer
+        is AppUpdateStatus.Error -> colorScheme.errorContainer
+        else -> colorScheme.primaryContainer
+    }
+
+    val iconTint = when (status) {
+        is AppUpdateStatus.UpToDate -> extendedColors.onSuccessContainer
+        is AppUpdateStatus.UpdateAvailable,
+        is AppUpdateStatus.ReadyToInstall -> colorScheme.onPrimaryContainer
+        is AppUpdateStatus.Error -> colorScheme.onErrorContainer
+        else -> colorScheme.onPrimaryContainer
+    }
+
+    val statusTitle = when (status) {
+        AppUpdateStatus.Idle -> "${AppMetadata.APP_SHORT_NAME} v$installedVersion"
+        AppUpdateStatus.Checking -> "Checking GitHub releases…"
+        is AppUpdateStatus.UpToDate -> "Up to date • v${status.currentVersion}"
+        is AppUpdateStatus.UpdateAvailable -> "Update available • ${status.release.tagName}"
+        is AppUpdateStatus.Downloading -> "Downloading ${status.release.tagName}…"
+        is AppUpdateStatus.ReadyToInstall -> "Ready to install • ${status.release.tagName}"
+        is AppUpdateStatus.Error -> if (status.release != null) {
+            "Download failed • ${status.release.tagName}"
+        } else {
+            "Update check failed"
+        }
+    }
+
+    val statusSubtitle = when (status) {
+        AppUpdateStatus.Idle -> "Tap Check to look for new APK releases"
+        AppUpdateStatus.Checking -> "Fetching latest release from ${AppMetadata.GITHUB_DISPLAY_LINK}"
+        is AppUpdateStatus.UpToDate -> status.latestRelease?.let {
+            "Latest on GitHub: ${it.tagName}"
+        } ?: "You have the latest installed build"
+        is AppUpdateStatus.UpdateAvailable -> {
+            val sizeText = if (status.release.apkSizeBytes > 0L) {
+                " • ${MediaSizeCalculator.formatFileSize(status.release.apkSizeBytes)}"
+            } else ""
+            "Installed v${status.currentVersion}$sizeText"
+        }
+        is AppUpdateStatus.Downloading -> if (status.totalBytes > 0L) {
+            "${MediaSizeCalculator.formatFileSize(status.downloadedBytes)} / ${MediaSizeCalculator.formatFileSize(status.totalBytes)} (${status.progressPercent}%)"
+        } else {
+            "${MediaSizeCalculator.formatFileSize(status.downloadedBytes)} downloaded"
+        }
+        is AppUpdateStatus.ReadyToInstall -> status.release.apkFileName ?: "APK ready for installation"
+        is AppUpdateStatus.Error -> status.message
+    }
+
+    val subtitleColor = when (status) {
+        is AppUpdateStatus.UpToDate -> extendedColors.success
+        is AppUpdateStatus.UpdateAvailable,
+        is AppUpdateStatus.ReadyToInstall -> colorScheme.primary
+        is AppUpdateStatus.Error -> colorScheme.error
+        else -> colorScheme.onSurfaceVariant
+    }
+
+    SettingsGroupCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                UdmIconSquircle(
+                    icon = iconVector,
+                    containerColor = iconBg,
+                    contentColor = iconTint,
+                    size = 38.dp,
+                    iconSize = 19.dp,
+                    cornerRadius = 11.dp
+                )
+                Column(modifier = Modifier.padding(end = 8.dp)) {
+                    Text(
+                        text = statusTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = statusSubtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = subtitleColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            when (status) {
+                AppUpdateStatus.Checking -> {
+                    FilledTonalButton(
+                        onClick = {},
+                        enabled = false,
+                        shape = CircleShape,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(15.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+                is AppUpdateStatus.UpdateAvailable -> {
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onDownloadUpdate(status.release)
+                        },
+                        shape = CircleShape,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = if (status.release.apkDownloadUrl != null) "Download" else "Open",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+                is AppUpdateStatus.Downloading -> {
+                    FilledTonalButton(
+                        onClick = {},
+                        enabled = false,
+                        shape = CircleShape,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = "${status.progressPercent}%",
+                            style = UdmTextStyles.TabularMetricSmall
+                        )
+                    }
+                }
+                is AppUpdateStatus.ReadyToInstall -> {
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onInstallUpdate(status.apkFile)
+                        },
+                        shape = CircleShape,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Text("Install", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+                is AppUpdateStatus.Error -> {
+                    FilledTonalButton(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            if (status.release != null) {
+                                onDownloadUpdate(status.release)
+                            } else {
+                                onCheckForUpdates()
+                            }
+                        },
+                        shape = CircleShape,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Text("Retry", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+                else -> {
+                    FilledTonalButton(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onCheckForUpdates()
+                        },
+                        shape = CircleShape,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Text("Check", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+
+        if (status is AppUpdateStatus.Downloading) {
+            if (status.totalBytes > 0L) {
+                LinearProgressIndicator(
+                    progress = { (status.progressPercent / 100f).coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(CircleShape)
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(CircleShape)
+                )
+            }
+        }
+
+        val showNotesRelease = when (status) {
+            is AppUpdateStatus.UpdateAvailable -> status.release
+            is AppUpdateStatus.ReadyToInstall -> status.release
+            else -> null
+        }
+        if (showNotesRelease != null && showNotesRelease.releaseNotes.isNotBlank()) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = colorScheme.surfaceContainer
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = showNotesRelease.title,
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = colorScheme.onSurface
+                    )
+                    Text(
+                        text = showNotesRelease.releaseNotes,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorScheme.onSurfaceVariant,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        SettingsInsetDivider()
+
+        val targetGitHubUrl = when {
+            status is AppUpdateStatus.UpdateAvailable -> status.release.htmlUrl
+            status is AppUpdateStatus.ReadyToInstall -> status.release.htmlUrl
+            activeRelease != null -> activeRelease.htmlUrl
+            else -> AppMetadata.GITHUB_RELEASES_URL
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onOpenGitHub(targetGitHubUrl)
+                }
+                .padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                UdmIconSquircle(
+                    icon = Icons.Default.Code,
+                    containerColor = colorScheme.surfaceContainerHighest,
+                    contentColor = colorScheme.onSurface,
+                    size = 38.dp,
+                    iconSize = 19.dp,
+                    cornerRadius = 11.dp
+                )
+                Column(modifier = Modifier.padding(end = 8.dp)) {
+                    Text(
+                        text = "GitHub repository & releases",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = colorScheme.onSurface
+                    )
+                    Text(
+                        text = AppMetadata.GITHUB_DISPLAY_LINK,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                contentDescription = "Open GitHub",
+                tint = colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                modifier = Modifier.size(17.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SupportDevelopmentCard(
+    onCopyUpi: () -> Unit,
+    onLaunchUpi: (amountInr: String?) -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val extendedColors = UdmTheme.extendedColors
+    val haptic = LocalHapticFeedback.current
+
+    var selectedAmount by remember { mutableStateOf<String?>("100") }
+    var copiedFeedback by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copiedFeedback) {
+        if (copiedFeedback) {
+            delay(2200)
+            copiedFeedback = false
+        }
+    }
+
+    UdmTonalCard(
+        shape = RoundedCornerShape(22.dp),
+        containerColor = colorScheme.surfaceContainerLow
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     UdmIconSquircle(
                         icon = Icons.Default.Favorite,
-                        containerColor = colorScheme.errorContainer,
-                        contentColor = colorScheme.onErrorContainer,
-                        size = 38.dp,
-                        iconSize = 19.dp,
-                        cornerRadius = 11.dp
+                        containerColor = colorScheme.tertiaryContainer,
+                        contentColor = colorScheme.onTertiaryContainer,
+                        size = 42.dp,
+                        iconSize = 21.dp,
+                        cornerRadius = 13.dp
                     )
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            text = "Support development",
-                            style = MaterialTheme.typography.titleSmall,
+                            text = "Keep ${AppMetadata.APP_SHORT_NAME} ad-free",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = colorScheme.onSurface
                         )
                         Text(
-                            text = "Made by ${AppMetadata.DEVELOPER_NAME} • Free & ad-free",
+                            text = "Built independently by ${AppMetadata.DEVELOPER_NAME}",
                             style = MaterialTheme.typography.bodySmall,
                             color = colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(colorScheme.surfaceContainer)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    shape = CircleShape,
+                    color = colorScheme.primaryContainer.copy(alpha = 0.7f)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = AppMetadata.DONATION_UPI_ID,
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                            color = colorScheme.onSurface
-                        )
-                        if (copiedUpiMessage != null) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = extendedColors.success,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Text(
-                                    text = copiedUpiMessage!!,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = extendedColors.success
-                                )
-                            }
-                        }
-                    }
+                    Text(
+                        text = "UPI",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            // Quick amount selector pills
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SupportAmountOptions.forEach { (amountValue, label) ->
+                    val isSelected = selectedAmount == amountValue
+                    val chipBg by animateColorAsState(
+                        targetValue = if (isSelected) colorScheme.primaryContainer else colorScheme.surfaceContainer,
+                        animationSpec = tween(150),
+                        label = "SupportAmountBg"
+                    )
+                    val chipContent by animateColorAsState(
+                        targetValue = if (isSelected) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
+                        animationSpec = tween(150),
+                        label = "SupportAmountText"
+                    )
+
+                    Surface(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            selectedAmount = amountValue
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        color = chipBg,
+                        border = if (isSelected) {
+                            BorderStroke(1.dp, colorScheme.primary.copy(alpha = 0.55f))
+                        } else null
                     ) {
-                        IconButton(
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                cm?.setPrimaryClip(ClipData.newPlainText("UPI ID", AppMetadata.DONATION_UPI_ID))
-                                copiedUpiMessage = "Copied"
-                            },
-                            modifier = Modifier.size(34.dp)
+                        Box(
+                            modifier = Modifier.padding(vertical = 9.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCopy,
-                                contentDescription = "Copy UPI ID",
-                                tint = colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                ),
+                                color = chipContent,
+                                maxLines = 1
                             )
-                        }
-
-                        Button(
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                val upiUri = AppMetadata.getUpiPaymentUri().toUri()
-                                val intent = Intent(Intent.ACTION_VIEW, upiUri)
-                                val chooser = Intent.createChooser(intent, "Donate via UPI")
-                                runCatching { context.startActivity(chooser) }
-                            },
-                            shape = CircleShape,
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AccountBalanceWallet,
-                                contentDescription = null,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Donate", style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
             }
+
+            // UPI ID copy pill + Donate CTA
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onCopyUpi()
+                        copiedFeedback = true
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    color = colorScheme.surfaceContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (copiedFeedback) Icons.Default.CheckCircle else Icons.Default.ContentCopy,
+                            contentDescription = "Copy UPI ID",
+                            tint = if (copiedFeedback) extendedColors.success else colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (copiedFeedback) "UPI ID copied" else AppMetadata.DONATION_UPI_ID,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                                color = if (copiedFeedback) extendedColors.success else colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLaunchUpi(selectedAmount)
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AccountBalanceWallet,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = selectedAmount?.let { "Donate ₹$it" } ?: "Donate",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+            }
         }
-
-        Text(
-            text = "UDM v${AppMetadata.APP_VERSION}",
-            style = MaterialTheme.typography.bodySmall,
-            color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 4.dp)
-        )
-    }
-
-    if (showSearchEngineDialog) {
-        SearchEngineSelectionDialog(
-            selectedEngine = currentEngine,
-            onSelectEngine = { selected ->
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                settings.updateSearchEngine(selected.name)
-                showSearchEngineDialog = false
-            },
-            onDismiss = { showSearchEngineDialog = false }
-        )
     }
 }
 
@@ -661,6 +1221,102 @@ private fun SettingsInsetDivider() {
 }
 
 @Composable
+private fun <T> SettingSegmentedRow(
+    icon: ImageVector,
+    iconBg: Color,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    options: List<Pair<T, String>>,
+    selectedOption: T,
+    onOptionSelected: (T) -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    val colorScheme = MaterialTheme.colorScheme
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            UdmIconSquircle(
+                icon = icon,
+                containerColor = iconBg,
+                contentColor = iconTint,
+                size = 38.dp,
+                iconSize = 19.dp,
+                cornerRadius = 11.dp
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = colorScheme.onSurface
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = colorScheme.surfaceContainer
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                options.forEach { (value, label) ->
+                    val selected = value == selectedOption
+                    val pillBg by animateColorAsState(
+                        targetValue = if (selected) colorScheme.primaryContainer else Color.Transparent,
+                        animationSpec = tween(150),
+                        label = "SegmentBg"
+                    )
+                    val pillText by animateColorAsState(
+                        targetValue = if (selected) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
+                        animationSpec = tween(150),
+                        label = "SegmentText"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(pillBg)
+                            .clickable {
+                                if (!selected) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onOptionSelected(value)
+                                }
+                            }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+                            ),
+                            color = pillText,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingSwitchRow(
     icon: ImageVector,
     iconBg: Color,
@@ -668,6 +1324,7 @@ private fun SettingSwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,
+    enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
@@ -676,8 +1333,9 @@ private fun SettingSwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.5f)
             .clip(RoundedCornerShape(12.dp))
-            .clickable {
+            .clickable(enabled = enabled) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onCheckedChange(!checked)
             }
@@ -717,6 +1375,7 @@ private fun SettingSwitchRow(
 
         Switch(
             checked = checked,
+            enabled = enabled,
             onCheckedChange = {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onCheckedChange(it)
@@ -785,29 +1444,6 @@ private fun SettingNavRow(
             tint = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             modifier = Modifier.size(14.dp)
         )
-    }
-}
-
-private fun openUdmFolder(context: Context) {
-    try {
-        val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "UDM")
-        if (!folder.exists()) folder.mkdirs()
-
-        val docUri = DocumentsContract.buildRootUri("com.android.externalstorage.documents", "primary")
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(docUri, DocumentsContract.Document.MIME_TYPE_DIR)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(intent)
-    } catch (_: Exception) {
-        try {
-            val dmIntent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(dmIntent)
-        } catch (_: Exception) {
-            Toast.makeText(context, "Saved to /Download/UDM", Toast.LENGTH_LONG).show()
-        }
     }
 }
 

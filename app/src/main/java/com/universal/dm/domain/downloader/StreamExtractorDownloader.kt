@@ -40,6 +40,7 @@ class StreamExtractorDownloader(
         formatId: String? = null,
         threadCount: Int,
         referer: String? = null,
+        embedThumbnail: Boolean = true,
         onProgress: suspend (progressPercent: Int, speedBytesPerSec: Long, isMuxing: Boolean) -> Unit
     ): File = withContext(Dispatchers.IO) {
         if (!outputDirectory.exists()) outputDirectory.mkdirs()
@@ -52,6 +53,8 @@ class StreamExtractorDownloader(
         request.addOption("--no-check-certificates")
         request.addOption("--no-warnings")
         request.addOption("--no-playlist")
+        request.addOption("--no-call-home")
+        request.addOption("--socket-timeout", "8")
         request.addOption("--concurrent-fragments", threadCount.coerceIn(1, 16))
         request.addOption("--retries", "10")
         request.addOption("--fragment-retries", "10")
@@ -60,7 +63,12 @@ class StreamExtractorDownloader(
         val isYouTube = url.contains("youtube.com", ignoreCase = true) ||
             url.contains("youtu.be", ignoreCase = true)
 
-        if (!isYouTube) {
+        if (isYouTube) {
+            request.addOption(
+                "--extractor-args",
+                "youtube:skip=translated_subs"
+            )
+        } else {
             request.addOption(
                 "--user-agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -122,27 +130,38 @@ class StreamExtractorDownloader(
 
             request.addOption("-f", "bestaudio/best")
             request.addOption("-x")
+            request.addOption("--add-metadata")
 
-            when {
+            val selectedAudioFormat = when {
                 codecLabel.contains("M4A", ignoreCase = true) -> {
                     request.addOption("--audio-format", "m4a")
                     request.addOption("--audio-quality", bitrateStr)
+                    "m4a"
                 }
                 codecLabel.contains("Opus", ignoreCase = true) -> {
                     request.addOption("--audio-format", "opus")
                     request.addOption("--audio-quality", bitrateStr)
+                    "opus"
                 }
                 codecLabel.contains("FLAC", ignoreCase = true) -> {
                     request.addOption("--audio-format", "flac")
                     request.addOption("--audio-quality", "0")
+                    "flac"
                 }
                 codecLabel.contains("WAV", ignoreCase = true) -> {
                     request.addOption("--audio-format", "wav")
+                    "wav"
                 }
                 else -> {
                     request.addOption("--audio-format", "mp3")
                     request.addOption("--audio-quality", bitrateStr)
+                    "mp3"
                 }
+            }
+
+            if (embedThumbnail && (selectedAudioFormat == "mp3" || selectedAudioFormat == "m4a" || selectedAudioFormat == "opus" || selectedAudioFormat == "flac")) {
+                request.addOption("--embed-thumbnail")
+                request.addOption("--convert-thumbnails", "jpg")
             }
         }
 
@@ -204,6 +223,8 @@ class StreamExtractorDownloader(
                 }
 
                 var isMuxing = false
+                var wasMuxing = false
+                var wasCompleted = false
                 var lastEmitNanos = 0L
 
                 try {
@@ -226,8 +247,12 @@ class StreamExtractorDownloader(
 
                         val progressPercent = progress.toInt().coerceIn(0, 100)
                         val nowNanos = System.nanoTime()
-                        if (nowNanos - lastEmitNanos >= CALLBACK_THROTTLE_NANOS || progressPercent == 100 || isMuxing) {
+                        val muxJustStarted = isMuxing && !wasMuxing
+                        val justReached100 = progressPercent == 100 && !wasCompleted
+                        if (nowNanos - lastEmitNanos >= CALLBACK_THROTTLE_NANOS || justReached100 || muxJustStarted) {
                             lastEmitNanos = nowNanos
+                            if (isMuxing) wasMuxing = true
+                            if (progressPercent == 100) wasCompleted = true
                             val speedBytes = parseSpeedBytesPerSec(line)
                             val parsedStreamBytes = parseStreamSizeBytes(line)
                             progressChannel.trySend(

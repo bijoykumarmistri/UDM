@@ -17,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.core.content.ContextCompat
 import com.universal.dm.ui.navigation.UdmAppShell
 import com.universal.dm.ui.settings.AppSettingsState
+import com.universal.dm.ui.settings.AppThemeMode
 import com.universal.dm.ui.settings.LocalAppSettings
 import com.universal.dm.ui.theme.UDMTheme
 
@@ -38,7 +39,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             val appSettings = remember { AppSettingsState(this@MainActivity) }
             val sharedUrl by sharedUrlState
-            val darkTheme = isSystemInDarkTheme()
+            val systemDark = isSystemInDarkTheme()
+            val darkTheme = when (appSettings.themeMode) {
+                AppThemeMode.SYSTEM -> systemDark
+                AppThemeMode.LIGHT -> false
+                AppThemeMode.DARK -> true
+            }
 
             androidx.compose.runtime.LaunchedEffect(Unit) {
                 kotlinx.coroutines.delay(1200)

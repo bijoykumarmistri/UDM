@@ -5,12 +5,15 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import java.util.concurrent.TimeUnit
 import com.universal.dm.UdmApplication
 import com.universal.dm.data.local.DownloadDao
 import com.universal.dm.data.local.DownloadTaskEntity
@@ -33,6 +36,36 @@ class DownloadManager private constructor(context: Context) {
 
     init {
         registerNetworkCallback()
+        reconcileOrphanedTasks()
+    }
+
+    private fun reconcileOrphanedTasks() {
+        UdmApplication.appScope.launch {
+            runCatching {
+                val queuedTasks = downloadDao.getTasksByStatus(DownloadStatus.QUEUED)
+                queuedTasks.forEach { task ->
+                    val workInfos = workManager.getWorkInfosForUniqueWork("download_${task.id}").get()
+                    val hasActiveWork = workInfos.any { !it.state.isFinished }
+                    if (!hasActiveWork) {
+                        scheduleWork(task.id)
+                    }
+                }
+
+                val activeTasks = downloadDao.getTasksByStatus(DownloadStatus.DOWNLOADING) +
+                    downloadDao.getTasksByStatus(DownloadStatus.MERGING_MUXING)
+                activeTasks.forEach { task ->
+                    val workInfos = workManager.getWorkInfosForUniqueWork("download_${task.id}").get()
+                    val hasActiveWork = workInfos.any { !it.state.isFinished }
+                    if (!hasActiveWork) {
+                        downloadDao.updateTaskStatus(
+                            task.id,
+                            DownloadStatus.PAUSED,
+                            "Interrupted — tap to resume"
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private fun registerNetworkCallback() {
@@ -87,7 +120,8 @@ class DownloadManager private constructor(context: Context) {
         codecLabel: String = "AV1",
         formatId: String? = null,
         threadCount: Int = 8,
-        totalBytes: Long = 0L
+        totalBytes: Long = 0L,
+        thumbnailUrl: String? = null
     ): String = withContext(Dispatchers.IO) {
         val taskId = UUID.randomUUID().toString()
 
@@ -108,7 +142,8 @@ class DownloadManager private constructor(context: Context) {
             status = DownloadStatus.QUEUED,
             speedBytesPerSec = 0L,
             threadCount = threadCount.coerceIn(1, 16),
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            thumbnailUrl = thumbnailUrl
         )
 
         downloadDao.insertTask(task)
@@ -173,6 +208,8 @@ class DownloadManager private constructor(context: Context) {
 
         val workRequest = OneTimeWorkRequestBuilder<UdmDownloadWorker>()
             .setConstraints(constraints)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
             .addTag(taskId)
             .setInputData(workDataOf(UdmDownloadWorker.KEY_TASK_ID to taskId))
             .build()
@@ -182,6 +219,75 @@ class DownloadManager private constructor(context: Context) {
             ExistingWorkPolicy.REPLACE,
             workRequest
         )
+    }
+
+    suspend fun getReclaimableCacheBytes(): Long = withContext(Dispatchers.IO) {
+        val activeTaskIds = getProtectedTaskIds()
+        var totalBytes = 0L
+
+        val downloadsCacheDir = File(appContext.cacheDir, "downloads")
+        if (downloadsCacheDir.exists()) {
+            downloadsCacheDir.listFiles()?.forEach { child ->
+                val isProtected = child.isDirectory &&
+                    child.name.startsWith("task_") &&
+                    activeTaskIds.contains(child.name.removePrefix("task_"))
+                if (!isProtected) {
+                    totalBytes += calculateFileSize(child)
+                }
+            }
+        }
+
+        val logsCacheDir = File(appContext.cacheDir, "logs")
+        if (logsCacheDir.exists()) {
+            totalBytes += calculateFileSize(logsCacheDir)
+        }
+
+        totalBytes
+    }
+
+    suspend fun clearReclaimableCache(): Long = withContext(Dispatchers.IO) {
+        val activeTaskIds = getProtectedTaskIds()
+        var freedBytes = 0L
+
+        val downloadsCacheDir = File(appContext.cacheDir, "downloads")
+        if (downloadsCacheDir.exists()) {
+            downloadsCacheDir.listFiles()?.forEach { child ->
+                val isProtected = child.isDirectory &&
+                    child.name.startsWith("task_") &&
+                    activeTaskIds.contains(child.name.removePrefix("task_"))
+                if (!isProtected) {
+                    freedBytes += calculateFileSize(child)
+                    runCatching { child.deleteRecursively() }
+                }
+            }
+        }
+
+        val logsCacheDir = File(appContext.cacheDir, "logs")
+        if (logsCacheDir.exists()) {
+            freedBytes += calculateFileSize(logsCacheDir)
+            runCatching { logsCacheDir.deleteRecursively() }
+        }
+
+        freedBytes
+    }
+
+    private suspend fun getProtectedTaskIds(): Set<String> {
+        val protectedStatuses = listOf(
+            DownloadStatus.QUEUED,
+            DownloadStatus.DOWNLOADING,
+            DownloadStatus.MERGING_MUXING,
+            DownloadStatus.PAUSED
+        )
+        return protectedStatuses
+            .flatMap { status -> downloadDao.getTasksByStatus(status) }
+            .map { it.id }
+            .toSet()
+    }
+
+    private fun calculateFileSize(file: File): Long {
+        if (!file.exists()) return 0L
+        if (file.isFile) return file.length()
+        return file.listFiles()?.sumOf { calculateFileSize(it) } ?: 0L
     }
 
     companion object {

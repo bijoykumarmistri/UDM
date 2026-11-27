@@ -165,6 +165,12 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
 
             val appSettings = com.universal.dm.ui.settings.AppSettingsState(getApplication())
             val targetFolder = appSettings.defaultDownloadFolder.ifBlank { "/storage/emulated/0/Download/UDM" }
+            val preferredQualityLabel = when (appSettings.preferredVideoQuality) {
+                2160 -> "2160p 4K"
+                720 -> "720p HD"
+                480 -> "480p"
+                else -> "1080p FHD"
+            }
 
             downloadManager.enqueueDownload(
                 title = fileName.ifEmpty { inferredName ?: if (isStreamingUrl) "Web Video Stream" else "Direct File Download" },
@@ -173,7 +179,7 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
                 fileName = sanitizedName,
                 destinationFolder = targetFolder,
                 mediaType = mediaType,
-                qualityLabel = if (isStreamingUrl) "1080p FHD" else "Standard",
+                qualityLabel = if (isStreamingUrl) preferredQualityLabel else "Standard",
                 codecLabel = if (isStreamingUrl) "AV1/H.264" else "Direct",
                 threadCount = threadCount
             )

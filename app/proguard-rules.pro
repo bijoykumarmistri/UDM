@@ -18,3 +18,12 @@
 -keep class * implements org.apache.commons.compress.archivers.zip.ZipExtraField { *; }
 -keep class org.apache.commons.compress.archivers.zip.** { *; }
 -dontwarn org.apache.commons.compress.**
+
+# WorkManager InputMerger subclasses (e.g. OverwritingInputMerger) are instantiated via reflection
+-keep class * extends androidx.work.InputMerger {
+    <init>();
+}
+-keep public class * extends androidx.work.ListenableWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
+

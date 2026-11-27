@@ -21,11 +21,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.universal.dm"
+        applicationId = "com.bkm.universal.dm"
         minSdk = 31
         targetSdk = 37
-        versionCode = 7
-        versionName = "3.5"
+        versionCode = 8
+        versionName = "3.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

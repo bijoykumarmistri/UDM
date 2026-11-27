@@ -33,5 +33,6 @@ data class DownloadTaskEntity(
     val speedBytesPerSec: Long = 0L,
     val threadCount: Int = 4,
     val createdAt: Long = System.currentTimeMillis(),
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val thumbnailUrl: String? = null
 )
